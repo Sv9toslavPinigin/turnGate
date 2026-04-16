@@ -469,6 +469,12 @@ func getCreds(link string) (string, string, string, error) {
 						return "", "", "", fmt.Errorf("FATAL_CAPTCHA_FAILED_NO_STREAMS")
 					}
 
+					// Unified success log so Android UI can react in both
+					// auto and manual paths (CaptchaSolved event).
+					if successToken != "" {
+						log.Println("[Captcha] Success! Got success_token")
+					}
+
 					if captchaErr.CaptchaAttempt == "0" || captchaErr.CaptchaAttempt == "" {
 						captchaErr.CaptchaAttempt = "1"
 					}
