@@ -38,6 +38,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _updateInfo = MutableStateFlow<UpdateInfo?>(null)
     val updateInfo: StateFlow<UpdateInfo?> = _updateInfo.asStateFlow()
 
+    /**
+     * Порядковый номер текущей manual-captcha в сессии. Показывается юзеру
+     * как «Captcha #3» чтобы было понятно что их может быть несколько.
+     * Сбрасывается при connect()/disconnect().
+     */
+    private val _captchaCount = MutableStateFlow(0)
+    val captchaCount: StateFlow<Int> = _captchaCount.asStateFlow()
+
     init {
         refreshProfileState()
         checkForUpdates()
@@ -54,12 +62,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             proxyManager.captchaEvent.collect { event ->
                 when (event) {
                     is CaptchaEvent.ManualCaptchaRequired -> {
+                        _captchaCount.value = _captchaCount.value + 1
                         _showCaptchaDialog.value = true
-                        _state.value = _state.value.copy(statusText = "Waiting for manual captcha…")
+                        _state.value = _state.value.copy(
+                            statusText = "Waiting for captcha #${_captchaCount.value}…"
+                        )
                     }
                     is CaptchaEvent.CaptchaSolved -> {
                         _showCaptchaDialog.value = false
-                        _state.value = _state.value.copy(statusText = "Captcha solved, establishing tunnel…")
+                        _state.value = _state.value.copy(statusText = "Captcha solved, continuing…")
                     }
                     is CaptchaEvent.CaptchaFailed -> {
                         _showCaptchaDialog.value = false
@@ -195,16 +206,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         )
 
         viewModelScope.launch(Dispatchers.IO) {
-            // Manual captcha требует решения по 1 капче на идентичность.
-            // Решать 16 раз вручную нереально — форсим 1 поток в этом режиме.
-            val effectiveThreads = if (profile.manualCaptcha) 1 else profile.nValue
+            _captchaCount.value = 0
 
             // 1. Запускаем vk-turn-proxy-client
             val started = proxyManager.start(
                 serverAddress = profile.peerAddr,
                 vkLink = profile.vkLink,
                 listenAddress = profile.listenAddr,
-                threads = effectiveThreads,
+                threads = profile.nValue,
                 manualCaptcha = profile.manualCaptcha
             )
 

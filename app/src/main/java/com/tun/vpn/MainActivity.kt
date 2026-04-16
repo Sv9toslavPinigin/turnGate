@@ -209,7 +209,9 @@ fun MainApp(
 
         // Captcha WebView overlay
         if (showCaptcha) {
+            val captchaIdx by vm.captchaCount.collectAsStateWithLifecycle()
             CaptchaWebViewDialog(
+                captchaIndex = captchaIdx,
                 onDismiss = { vm.dismissCaptcha() },
                 onCancel = { vm.disconnect() }
             )
@@ -350,20 +352,11 @@ fun HomeScreen(
                             uncheckedColor = TextSecondary
                         )
                     )
-                    Column {
-                        Text(
-                            text = "Manual captcha",
-                            color = TextSecondary,
-                            fontSize = 13.sp
-                        )
-                        if (selectedProfile.manualCaptcha) {
-                            Text(
-                                text = "forces 1 connection",
-                                color = TextSecondary.copy(alpha = 0.6f),
-                                fontSize = 10.sp
-                            )
-                        }
-                    }
+                    Text(
+                        text = "Manual captcha",
+                        color = TextSecondary,
+                        fontSize = 13.sp
+                    )
                 }
             }
         }
