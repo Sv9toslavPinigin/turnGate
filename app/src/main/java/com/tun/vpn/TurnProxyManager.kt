@@ -21,6 +21,19 @@ sealed class CaptchaEvent {
 }
 
 /**
+ * Стадии установления соединения proxy → VK.
+ */
+sealed class ProxyStage {
+    object Starting : ProxyStage()
+    object AuthConnecting : ProxyStage()   // [VK Auth] Connecting Identity
+    object SolvingCaptcha : ProxyStage()
+    object CaptchaSolved : ProxyStage()
+    data class IdentityRegistered(val current: Int, val total: Int) : ProxyStage() // n/m
+    object DtlsEstablished : ProxyStage()   // Established DTLS connection!
+    object TurnAllocated : ProxyStage()     // relayed-address=...
+}
+
+/**
  * Управление процессом vk-turn-proxy-client.
  * Бинарник упакован как .so в jniLibs/arm64-v8a и автоматически распаковывается
  * Android-ом в nativeLibraryDir с правами на исполнение.
@@ -34,6 +47,9 @@ class TurnProxyManager(private val context: Context) {
 
     private val _captchaEvent = MutableSharedFlow<CaptchaEvent>(extraBufferCapacity = 10)
     val captchaEvent: SharedFlow<CaptchaEvent> = _captchaEvent.asSharedFlow()
+
+    private val _stage = MutableSharedFlow<ProxyStage>(extraBufferCapacity = 20, replay = 1)
+    val stage: SharedFlow<ProxyStage> = _stage.asSharedFlow()
 
     private fun addLog(line: String) {
         val current = _logs.value
@@ -51,11 +67,35 @@ class TurnProxyManager(private val context: Context) {
             }
             line.contains("[Captcha] Success! Got success_token") -> {
                 _captchaEvent.tryEmit(CaptchaEvent.CaptchaSolved)
+                _stage.tryEmit(ProxyStage.CaptchaSolved)
                 Log.i(TAG, "Captcha event: solved")
             }
             line.contains("manual captcha timed out") || line.contains("FATAL_CAPTCHA") -> {
                 _captchaEvent.tryEmit(CaptchaEvent.CaptchaFailed)
                 Log.i(TAG, "Captcha event: failed")
+            }
+        }
+    }
+
+    private fun detectStage(line: String) {
+        when {
+            line.contains("[VK Auth] Connecting Identity") -> {
+                _stage.tryEmit(ProxyStage.AuthConnecting)
+            }
+            line.contains("[Captcha] Attempt") && line.contains("solving") -> {
+                _stage.tryEmit(ProxyStage.SolvingCaptcha)
+            }
+            line.contains("Successfully registered User Identity") -> {
+                val match = Regex("""(\d+)/(\d+)""").find(line)
+                val cur = match?.groupValues?.get(1)?.toIntOrNull() ?: 0
+                val tot = match?.groupValues?.get(2)?.toIntOrNull() ?: 0
+                _stage.tryEmit(ProxyStage.IdentityRegistered(cur, tot))
+            }
+            line.contains("Established DTLS connection!") -> {
+                _stage.tryEmit(ProxyStage.DtlsEstablished)
+            }
+            line.contains("relayed-address=") -> {
+                _stage.tryEmit(ProxyStage.TurnAllocated)
             }
         }
     }
@@ -92,6 +132,7 @@ class TurnProxyManager(private val context: Context) {
 
         return try {
             _logs.value = emptyList()
+            _stage.tryEmit(ProxyStage.Starting)
             val cmd = mutableListOf(
                 binaryFile.absolutePath,
                 "-peer", serverAddress,
@@ -121,6 +162,7 @@ class TurnProxyManager(private val context: Context) {
                         addLog(line)
                         LogStore.addProxyLine(line)
                         detectCaptchaEvent(line)
+                        detectStage(line)
                     }
                 } catch (_: IOException) {
                     // процесс завершён

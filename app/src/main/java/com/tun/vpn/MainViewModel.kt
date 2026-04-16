@@ -55,16 +55,34 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 when (event) {
                     is CaptchaEvent.ManualCaptchaRequired -> {
                         _showCaptchaDialog.value = true
-                        _state.value = _state.value.copy(statusText = "Captcha required...")
+                        _state.value = _state.value.copy(statusText = "Waiting for manual captcha…")
                     }
                     is CaptchaEvent.CaptchaSolved -> {
                         _showCaptchaDialog.value = false
-                        _state.value = _state.value.copy(statusText = "Captcha solved, connecting...")
+                        _state.value = _state.value.copy(statusText = "Captcha solved, establishing tunnel…")
                     }
                     is CaptchaEvent.CaptchaFailed -> {
                         _showCaptchaDialog.value = false
                     }
                 }
+            }
+        }
+
+        // Собираем stage события — обновляем statusText пока не CONNECTED
+        viewModelScope.launch {
+            proxyManager.stage.collect { stage ->
+                if (_state.value.status == ConnectionState.CONNECTED) return@collect
+                val text = when (stage) {
+                    is ProxyStage.Starting -> "Starting proxy…"
+                    is ProxyStage.AuthConnecting -> "Authenticating with VK…"
+                    is ProxyStage.SolvingCaptcha -> "Solving captcha…"
+                    is ProxyStage.CaptchaSolved -> "Captcha solved, connecting…"
+                    is ProxyStage.IdentityRegistered ->
+                        "Registered identity ${stage.current}/${stage.total}…"
+                    is ProxyStage.DtlsEstablished -> "DTLS established, allocating TURN…"
+                    is ProxyStage.TurnAllocated -> "TURN allocated, waiting for handshake…"
+                }
+                _state.value = _state.value.copy(statusText = text)
             }
         }
     }
@@ -220,13 +238,35 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 tunnel = WgTunnel()
                 backend.setState(tunnel!!, Tunnel.State.UP, newConfig)
 
-                TunVpnService.connectionState = ConnectionState.CONNECTED
-                _state.value = _state.value.copy(
-                    status = ConnectionState.CONNECTED,
-                    statusText = "Connected"
-                )
-                LogStore.addAppLog("VPN tunnel UP - connected to ${profile.peerAddr}")
-                Log.i(TAG, "VPN tunnel UP")
+                // Оставляем статус CONNECTING, показываем что ждём handshake
+                if (_state.value.statusText.isBlank() || _state.value.statusText == "Starting proxy…") {
+                    _state.value = _state.value.copy(statusText = "Establishing secure tunnel…")
+                }
+
+                // Ждём handshake - проверяем latestHandshakeEpochMillis у peer.
+                // Таймаут 180 сек (учитываем что captcha может решаться до 60 сек).
+                val handshakeSucceeded = waitForHandshake(timeoutMs = 180_000)
+
+                if (handshakeSucceeded) {
+                    TunVpnService.connectionState = ConnectionState.CONNECTED
+                    _state.value = _state.value.copy(
+                        status = ConnectionState.CONNECTED,
+                        statusText = "Connected"
+                    )
+                    LogStore.addAppLog("VPN tunnel UP - handshake complete with ${profile.peerAddr}")
+                    Log.i(TAG, "VPN tunnel UP with handshake")
+                } else {
+                    // Таймаут ожидания handshake — откатываемся
+                    Log.w(TAG, "Handshake timeout, rolling back")
+                    try { backend.setState(tunnel!!, Tunnel.State.DOWN, null) } catch (_: Exception) {}
+                    tunnel = null
+                    proxyManager.stop()
+                    _state.value = _state.value.copy(
+                        status = ConnectionState.ERROR,
+                        statusText = "Handshake timeout — check proxy logs"
+                    )
+                    LogStore.addAppLog("Handshake timeout")
+                }
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to start VPN", e)
                 proxyManager.stop()
@@ -262,6 +302,31 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             )
             LogStore.addAppLog("VPN disconnected")
         }
+    }
+
+    /**
+     * Polling latestHandshakeEpochMillis у WireGuard peer.
+     * Возвращает true когда handshake успешно прошёл (>0), false по таймауту.
+     */
+    private suspend fun waitForHandshake(timeoutMs: Long): Boolean {
+        val deadline = System.currentTimeMillis() + timeoutMs
+        while (System.currentTimeMillis() < deadline) {
+            val t = tunnel ?: return false
+            try {
+                val stats = backend.getStatistics(t)
+                val peerKeys = stats.peers()
+                for (key in peerKeys) {
+                    val peerStats = stats.peer(key)
+                    if (peerStats != null && peerStats.latestHandshakeEpochMillis() > 0) {
+                        return true
+                    }
+                }
+            } catch (e: Exception) {
+                Log.d(TAG, "getStatistics failed: ${e.message}")
+            }
+            delay(1000)
+        }
+        return false
     }
 
     override fun onCleared() {

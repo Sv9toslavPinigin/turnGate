@@ -8,6 +8,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.*
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -30,6 +31,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -274,26 +277,42 @@ fun HomeScreen(
         update?.let { info ->
             Spacer(modifier = Modifier.height(8.dp))
             Surface(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(12.dp),
-                color = AccentGreen.copy(alpha = 0.12f),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .shadow(6.dp, RoundedCornerShape(14.dp), spotColor = AccentGreen.copy(alpha = 0.4f)),
+                shape = RoundedCornerShape(14.dp),
+                color = AccentGreen.copy(alpha = 0.15f),
                 onClick = { vm.downloadUpdate() }
             ) {
                 Row(
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(
-                        text = "Update v${info.versionName} available",
-                        color = AccentGreen,
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Medium,
-                        modifier = Modifier.weight(1f)
+                    Icon(
+                        Icons.Filled.ArrowDropDown,
+                        contentDescription = null,
+                        tint = AccentGreen,
+                        modifier = Modifier
+                            .size(20.dp)
+                            .padding(end = 4.dp)
                     )
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Update available",
+                            color = AccentGreen,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        Text(
+                            text = "v${info.versionName} · tap to install",
+                            color = AccentGreen.copy(alpha = 0.75f),
+                            fontSize = 11.sp
+                        )
+                    }
                     Text(
-                        text = "Download",
+                        text = "↓",
                         color = AccentGreen,
-                        fontSize = 13.sp,
+                        fontSize = 18.sp,
                         fontWeight = FontWeight.Bold
                     )
                 }
@@ -342,15 +361,33 @@ fun HomeScreen(
         // Shield icon
         ShieldIcon(state.status)
 
-        Spacer(modifier = Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(20.dp))
 
-        // Status text
-        Text(
-            text = state.statusText,
-            color = TextSecondary,
-            fontSize = 14.sp,
-            fontWeight = FontWeight.Medium
-        )
+        // Status text with optional progress indicator
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.Center
+        ) {
+            if (isBusy) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(14.dp),
+                    strokeWidth = 2.dp,
+                    color = AccentOrange
+                )
+                Spacer(modifier = Modifier.width(10.dp))
+            }
+            Text(
+                text = state.statusText,
+                color = when (state.status) {
+                    ConnectionState.CONNECTED -> AccentGreen
+                    ConnectionState.CONNECTING, ConnectionState.DISCONNECTING -> AccentOrange
+                    ConnectionState.ERROR -> AccentRed
+                    else -> TextSecondary
+                },
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Medium
+            )
+        }
 
         // Proxy logs panel
         if (state.proxyLogs.isNotEmpty()) {
@@ -618,7 +655,11 @@ fun ShieldIcon(status: ConnectionState) {
     )
 
     val glowAlpha by animateFloatAsState(
-        targetValue = if (status == ConnectionState.CONNECTED) 0.4f else 0f,
+        targetValue = when (status) {
+            ConnectionState.CONNECTED -> 0.45f
+            ConnectionState.CONNECTING, ConnectionState.DISCONNECTING -> 0.25f
+            else -> 0f
+        },
         animationSpec = tween(800),
         label = "glowAlpha"
     )
@@ -626,26 +667,71 @@ fun ShieldIcon(status: ConnectionState) {
     val infiniteTransition = rememberInfiniteTransition(label = "pulse")
     val pulseScale by infiniteTransition.animateFloat(
         initialValue = 1f,
-        targetValue = 1.15f,
+        targetValue = 1.12f,
         animationSpec = infiniteRepeatable(
-            animation = tween(1000, easing = EaseInOut),
+            animation = tween(1200, easing = EaseInOut),
             repeatMode = RepeatMode.Reverse
         ),
         label = "pulseScale"
     )
 
-    val scale = if (status == ConnectionState.CONNECTING) pulseScale else 1f
+    val breathScale by infiniteTransition.animateFloat(
+        initialValue = 1f,
+        targetValue = 1.04f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(2400, easing = EaseInOut),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "breathScale"
+    )
 
-    Box(contentAlignment = Alignment.Center) {
+    val scale = when (status) {
+        ConnectionState.CONNECTING, ConnectionState.DISCONNECTING -> pulseScale
+        ConnectionState.CONNECTED -> breathScale
+        else -> 1f
+    }
+
+    // Rotating orbit ring for CONNECTING
+    val orbitAngle by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = 360f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(2000, easing = LinearEasing)
+        ),
+        label = "orbitAngle"
+    )
+
+    Box(contentAlignment = Alignment.Center, modifier = Modifier.size(200.dp)) {
         if (glowAlpha > 0f) {
             Box(
                 modifier = Modifier
-                    .size(160.dp)
-                    .blur(40.dp)
+                    .size(180.dp)
+                    .blur(50.dp)
                     .clip(CircleShape)
                     .background(iconColor.copy(alpha = glowAlpha))
             )
         }
+
+        // Orbit ring while CONNECTING
+        if (status == ConnectionState.CONNECTING || status == ConnectionState.DISCONNECTING) {
+            Canvas(modifier = Modifier.size(150.dp)) {
+                drawArc(
+                    color = iconColor,
+                    startAngle = orbitAngle,
+                    sweepAngle = 90f,
+                    useCenter = false,
+                    style = Stroke(width = 3.dp.toPx(), cap = StrokeCap.Round)
+                )
+                drawArc(
+                    color = iconColor.copy(alpha = 0.3f),
+                    startAngle = orbitAngle + 180f,
+                    sweepAngle = 60f,
+                    useCenter = false,
+                    style = Stroke(width = 3.dp.toPx(), cap = StrokeCap.Round)
+                )
+            }
+        }
+
         Icon(
             Icons.Filled.Shield,
             contentDescription = "VPN Status",
