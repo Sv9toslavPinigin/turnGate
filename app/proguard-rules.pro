@@ -1,0 +1,3 @@
+# WireGuard
+-keep class com.wireguard.** { *; }
+-dontwarn com.wireguard.**
