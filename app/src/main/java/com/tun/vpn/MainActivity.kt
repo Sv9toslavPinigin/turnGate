@@ -209,7 +209,10 @@ fun MainApp(
 
         // Captcha WebView overlay
         if (showCaptcha) {
-            CaptchaWebViewDialog(onDismiss = { vm.dismissCaptcha() })
+            CaptchaWebViewDialog(
+                onDismiss = { vm.dismissCaptcha() },
+                onCancel = { vm.disconnect() }
+            )
         }
     }
 }
@@ -347,11 +350,20 @@ fun HomeScreen(
                             uncheckedColor = TextSecondary
                         )
                     )
-                    Text(
-                        text = "Manual captcha",
-                        color = TextSecondary,
-                        fontSize = 13.sp
-                    )
+                    Column {
+                        Text(
+                            text = "Manual captcha",
+                            color = TextSecondary,
+                            fontSize = 13.sp
+                        )
+                        if (selectedProfile.manualCaptcha) {
+                            Text(
+                                text = "forces 1 connection",
+                                color = TextSecondary.copy(alpha = 0.6f),
+                                fontSize = 10.sp
+                            )
+                        }
+                    }
                 }
             }
         }

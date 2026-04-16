@@ -15,15 +15,13 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -38,31 +36,63 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import kotlinx.coroutines.delay
 
 /**
  * Диалог с WebView для ручного решения капчи VK.
- * Загружает страницу с localhost:8765, которую отдаёт Go-бинарник proxy.
- * Автоматически закрывается когда капча решена (по событию CaptchaSolved).
+ * Загружает страницу с localhost:8765 (proxy reverse-proxy).
+ *
+ * Закрывается автоматически:
+ * - когда пользователь решил капчу (фраза "Done!" в body);
+ * - когда proxy прислал событие CaptchaSolved (через ViewModel → onDismiss).
+ *
+ * @param onDismiss  — капча успешно решена либо её больше не ждут (скрыть диалог).
+ * @param onCancel   — пользователь явно отменил, нужен полный disconnect.
  */
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
 fun CaptchaWebViewDialog(
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    onCancel: () -> Unit
 ) {
     var webViewRef by remember { mutableStateOf<WebView?>(null) }
+    var dismissed by remember { mutableStateOf(false) }
+
+    fun dismissOnce() {
+        if (!dismissed) {
+            dismissed = true
+            onDismiss()
+        }
+    }
+
+    // Polling body.innerText каждые 500ms — надёжно ловит success страницу.
+    LaunchedEffect(Unit) {
+        while (!dismissed) {
+            delay(500)
+            webViewRef?.evaluateJavascript(
+                "(document.body && document.body.innerText) || ''"
+            ) { result ->
+                if (result?.contains("Done!") == true ||
+                    result?.contains("close the page") == true
+                ) {
+                    dismissOnce()
+                }
+            }
+        }
+    }
 
     Dialog(
-        onDismissRequest = onDismiss,
+        onDismissRequest = { /* не даём закрыть тапом вне */ },
         properties = DialogProperties(
             usePlatformDefaultWidth = false,
-            dismissOnBackPress = true,
+            dismissOnBackPress = false,
             dismissOnClickOutside = false
         )
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .fillMaxHeight(0.85f)
+                .fillMaxHeight(0.9f)
                 .clip(RoundedCornerShape(16.dp))
                 .background(Color(0xFF1E293B))
                 .padding(12.dp)
@@ -73,35 +103,33 @@ fun CaptchaWebViewDialog(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(
-                    text = "Solve Captcha",
-                    color = Color(0xFFF1F5F9),
-                    fontSize = 18.sp,
-                    fontWeight = FontWeight.SemiBold
-                )
-                Row {
-                    OutlinedButton(
-                        onClick = { webViewRef?.reload() },
-                        shape = RoundedCornerShape(8.dp)
-                    ) {
-                        Text("Reload")
-                    }
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Button(
-                        onClick = onDismiss,
-                        shape = RoundedCornerShape(8.dp),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = Color(0xFFEF4444)
-                        )
-                    ) {
-                        Text("Cancel")
-                    }
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "Solve Captcha",
+                        color = Color(0xFFF1F5F9),
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Text(
+                        text = "Cancel aborts connection",
+                        color = Color(0xFF94A3B8),
+                        fontSize = 11.sp
+                    )
+                }
+                Button(
+                    onClick = onCancel,
+                    shape = RoundedCornerShape(8.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Color(0xFFEF4444)
+                    )
+                ) {
+                    Text("Cancel")
                 }
             }
 
             Spacer(modifier = Modifier.height(8.dp))
 
-            // WebView
+            // WebView — во всю высоту
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -123,15 +151,15 @@ fun CaptchaWebViewDialog(
                                         "(document.body && document.body.innerText) || ''"
                                     ) { result ->
                                         if (result?.contains("Done!") == true ||
-                                            result?.contains("close the page") == true) {
-                                            onDismiss()
+                                            result?.contains("close the page") == true
+                                        ) {
+                                            dismissOnce()
                                         }
                                     }
                                 }
                             }
 
                             webChromeClient = WebChromeClient()
-
                             loadUrl(CAPTCHA_URL)
                             webViewRef = this
                         }

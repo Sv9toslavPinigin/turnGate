@@ -195,12 +195,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         )
 
         viewModelScope.launch(Dispatchers.IO) {
+            // Manual captcha требует решения по 1 капче на идентичность.
+            // Решать 16 раз вручную нереально — форсим 1 поток в этом режиме.
+            val effectiveThreads = if (profile.manualCaptcha) 1 else profile.nValue
+
             // 1. Запускаем vk-turn-proxy-client
             val started = proxyManager.start(
                 serverAddress = profile.peerAddr,
                 vkLink = profile.vkLink,
                 listenAddress = profile.listenAddr,
-                threads = profile.nValue,
+                threads = effectiveThreads,
                 manualCaptcha = profile.manualCaptcha
             )
 
@@ -282,9 +286,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
      * Отключение: остановка VPN и proxy.
      */
     fun disconnect() {
+        // Если висит captcha dialog — закрываем немедленно (пользователь
+        // отменил либо мы сами останавливаемся).
+        _showCaptchaDialog.value = false
         _state.value = _state.value.copy(
             status = ConnectionState.DISCONNECTING,
-            statusText = "Stopping..."
+            statusText = "Stopping…"
         )
         viewModelScope.launch(Dispatchers.IO) {
             try {
