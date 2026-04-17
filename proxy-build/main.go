@@ -26,6 +26,19 @@ import (
 // forceManualCaptcha skips auto captcha solving and always opens manual WebView.
 var forceManualCaptcha bool
 
+// quietPionLogger silences pion/turn's periodic "Fail to refresh permissions"
+// warnings — they're not fatal and the tunnel works fine without refreshes.
+var quietPionLogger = func() logging.LoggerFactory {
+	f := logging.NewDefaultLoggerFactory()
+	f.DefaultLogLevel = logging.LogLevelWarn
+	f.ScopeLevels = map[string]logging.LogLevel{
+		// "turnc" is the pion TURN client scope — emits ERROR on permission refresh failure
+		// every few minutes even when the tunnel is healthy. Fully mute.
+		"turnc": logging.LogLevelDisabled,
+	}
+	return f
+}()
+
 type getCredsFunc func(string) (string, string, string, error)
 
 type turnParams struct {
@@ -305,7 +318,7 @@ func oneTurnConnection(ctx context.Context, tp *turnParams, peer *net.UDPAddr, c
 		Username:               user,
 		Password:               pass,
 		RequestedAddressFamily: addrFamily,
-		LoggerFactory:          logging.NewDefaultLoggerFactory(),
+		LoggerFactory:          quietPionLogger,
 		Net:                    &androidNet{},
 	}
 

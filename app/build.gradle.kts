@@ -12,8 +12,8 @@ android {
         applicationId = "com.tun.vpn"
         minSdk = 26
         targetSdk = 35
-        versionCode = 10
-        versionName = "10.0"
+        versionCode = 11
+        versionName = "11.0"
 
         buildConfigField("int", "VERSION_CODE", "$versionCode")
         buildConfigField("String", "VERSION_NAME", "\"$versionName\"")
