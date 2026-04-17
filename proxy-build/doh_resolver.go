@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"net/http"
 	"sync"
@@ -168,13 +169,35 @@ func dohLookup(ctx context.Context, host string) ([]string, error) {
 	return nil, lastErr
 }
 
-// tcpDnsResolver uses Go's built-in DNS over TCP to public servers.
-// Many carriers block UDP:53 but leave TCP:53 open.
+// Public DNS providers tried on any protocol. Russian operators typically
+// whitelist Yandex/SkyDNS/AdGuard.ru because their own infra uses them —
+// blocking these would break carrier services.
+var publicDnsServers = []string{
+	// Yandex DNS (Russian, rarely blocked by RU carriers)
+	"77.88.8.8:53",
+	"77.88.8.1:53",
+	"77.88.8.88:53", // Yandex Safe
+	"77.88.8.7:53",  // Yandex Family
+	// AdGuard DNS (Russian infra)
+	"94.140.14.14:53",
+	"94.140.15.15:53",
+	// SkyDNS (Russian)
+	"193.58.251.251:53",
+	// Cloudflare / Google — blocked by some RU carriers but worth trying
+	"1.1.1.1:53",
+	"1.0.0.1:53",
+	"8.8.8.8:53",
+	"8.8.4.4:53",
+	// Quad9
+	"9.9.9.9:53",
+}
+
+// tcpDnsResolver uses Go's built-in DNS over TCP.
 var tcpDnsResolver = &net.Resolver{
 	PreferGo: true,
 	Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
-		d := net.Dialer{Timeout: 5 * time.Second}
-		for _, dns := range []string{"1.1.1.1:53", "1.0.0.1:53", "8.8.8.8:53", "8.8.4.4:53"} {
+		d := net.Dialer{Timeout: 3 * time.Second}
+		for _, dns := range publicDnsServers {
 			conn, err := d.DialContext(ctx, "tcp", dns)
 			if err == nil {
 				return conn, nil
@@ -184,12 +207,12 @@ var tcpDnsResolver = &net.Resolver{
 	},
 }
 
-// udpDnsResolver — last resort, works on Wi-Fi where UDP:53 is allowed.
+// udpDnsResolver — works on Wi-Fi where UDP:53 is allowed.
 var udpDnsResolver = &net.Resolver{
 	PreferGo: true,
 	Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
-		d := net.Dialer{Timeout: 4 * time.Second}
-		for _, dns := range []string{"1.1.1.1:53", "8.8.8.8:53", "1.0.0.1:53", "8.8.4.4:53"} {
+		d := net.Dialer{Timeout: 3 * time.Second}
+		for _, dns := range publicDnsServers {
 			conn, err := d.DialContext(ctx, "udp", dns)
 			if err == nil {
 				return conn, nil
@@ -199,9 +222,8 @@ var udpDnsResolver = &net.Resolver{
 	},
 }
 
-// resolveHost tries carrier DNS (UDP → TCP) → DoH → public UDP → system.
-// Carrier DNS first because mobile carriers often white-list DNS and block
-// ALL public resolvers (1.1.1.1, 8.8.8.8) on any port.
+// resolveHost tries carrier DNS → DoH → public TCP → public UDP → system.
+// Each step logs its outcome so we can diagnose which firewall rules bite.
 func resolveHost(ctx context.Context, host string) ([]string, error) {
 	if ip := net.ParseIP(host); ip != nil {
 		return []string{host}, nil
@@ -210,61 +232,75 @@ func resolveHost(ctx context.Context, host string) ([]string, error) {
 		return cached, nil
 	}
 
-	// 1. Carrier DNS over UDP — works for any ISP that white-lists their DNS.
+	// 1. Carrier DNS over UDP — always works for the ISP's own subscribers.
 	if len(systemDnsServers) > 0 {
 		sysUdpCtx, cancel := context.WithTimeout(ctx, 4*time.Second)
 		ips, err := makeSystemDnsResolver("udp").LookupHost(sysUdpCtx, host)
 		cancel()
 		if err == nil && len(ips) > 0 {
+			log.Printf("[DNS] %s via carrier UDP: %v", host, ips)
 			cachePut(host, ips, 5*time.Minute)
 			return ips, nil
 		}
+		log.Printf("[DNS] carrier UDP failed: %v", err)
 
-		// 1b. Carrier DNS over TCP (rare but possible).
+		// 1b. Carrier DNS over TCP.
 		sysTcpCtx, cancel2 := context.WithTimeout(ctx, 4*time.Second)
 		ips, err = makeSystemDnsResolver("tcp").LookupHost(sysTcpCtx, host)
 		cancel2()
 		if err == nil && len(ips) > 0 {
+			log.Printf("[DNS] %s via carrier TCP: %v", host, ips)
 			cachePut(host, ips, 5*time.Minute)
 			return ips, nil
 		}
+		log.Printf("[DNS] carrier TCP failed: %v", err)
+	} else {
+		log.Printf("[DNS] no carrier DNS servers provided (-dns flag empty)")
 	}
 
-	// 2. DoH via HTTPS:443 to public resolvers.
+	// 2. DoH via HTTPS:443.
 	dohCtx, cancel := context.WithTimeout(ctx, 8*time.Second)
 	ips, err := dohLookup(dohCtx, host)
 	cancel()
 	if err == nil && len(ips) > 0 {
+		log.Printf("[DNS] %s via DoH: %v", host, ips)
 		cachePut(host, ips, 5*time.Minute)
 		return ips, nil
 	}
+	log.Printf("[DNS] DoH failed: %v", err)
 
-	// 3. DNS over TCP:53 to public resolvers.
+	// 3. Public DNS over TCP:53.
 	tcpCtx, cancel3 := context.WithTimeout(ctx, 6*time.Second)
 	ips, err = tcpDnsResolver.LookupHost(tcpCtx, host)
 	cancel3()
 	if err == nil && len(ips) > 0 {
+		log.Printf("[DNS] %s via public TCP: %v", host, ips)
 		cachePut(host, ips, 5*time.Minute)
 		return ips, nil
 	}
+	log.Printf("[DNS] public TCP failed: %v", err)
 
-	// 4. DNS over UDP:53 to public resolvers.
+	// 4. Public DNS over UDP:53.
 	udpCtx, cancel4 := context.WithTimeout(ctx, 5*time.Second)
 	ips, err = udpDnsResolver.LookupHost(udpCtx, host)
 	cancel4()
 	if err == nil && len(ips) > 0 {
+		log.Printf("[DNS] %s via public UDP: %v", host, ips)
 		cachePut(host, ips, 5*time.Minute)
 		return ips, nil
 	}
+	log.Printf("[DNS] public UDP failed: %v", err)
 
 	// 5. System resolver as last resort.
 	sysCtx, cancel5 := context.WithTimeout(ctx, 4*time.Second)
 	ips, err = net.DefaultResolver.LookupHost(sysCtx, host)
 	cancel5()
 	if err == nil && len(ips) > 0 {
+		log.Printf("[DNS] %s via system: %v", host, ips)
 		cachePut(host, ips, 1*time.Minute)
 		return ips, nil
 	}
+	log.Printf("[DNS] system resolver failed: %v", err)
 
 	return nil, fmt.Errorf("all DNS methods failed for %s", host)
 }
