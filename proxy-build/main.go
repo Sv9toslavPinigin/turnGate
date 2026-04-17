@@ -543,9 +543,26 @@ func main() {
 	listenAddr := flag.String("listen", "127.0.0.1:9000", "Local listen address")
 	n := flag.Int("n", 4, "Number of TURN connections")
 	manualCaptcha := flag.Bool("manual-captcha", false, "Skip auto captcha, always solve manually")
+	dnsFlag := flag.String("dns", "", "Comma-separated carrier/system DNS servers (IP:PORT), tried before public DNS")
 	flag.Parse()
 
 	forceManualCaptcha = *manualCaptcha
+
+	if *dnsFlag != "" {
+		for _, s := range strings.Split(*dnsFlag, ",") {
+			s = strings.TrimSpace(s)
+			if s == "" {
+				continue
+			}
+			if !strings.Contains(s, ":") {
+				s = s + ":53"
+			}
+			systemDnsServers = append(systemDnsServers, s)
+		}
+		if len(systemDnsServers) > 0 {
+			log.Printf("Using carrier DNS servers: %v", systemDnsServers)
+		}
+	}
 
 	if *peerAddr == "" || *vkLink == "" {
 		fmt.Fprintln(os.Stderr, "Usage: turngate-proxy -peer IP:PORT -vk-link LINK [-listen ADDR] [-n NUM]")

@@ -62,6 +62,29 @@ var (
 	dnsCache   = map[string]cacheEntry{}
 )
 
+// systemDnsServers — DNS операторы/роутера, переданные из Android через -dns флаг.
+// Оператор может white-list'ить свой DNS и резать все publics (1.1.1.1, 8.8.8.8).
+// Его собственный DNS доступен абонентам всегда.
+var systemDnsServers []string
+
+// systemDnsResolver uses DNS servers supplied by Android OS (carrier/router DNS).
+// Only created after systemDnsServers is populated from CLI flag.
+func makeSystemDnsResolver(proto string) *net.Resolver {
+	return &net.Resolver{
+		PreferGo: true,
+		Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
+			d := net.Dialer{Timeout: 4 * time.Second}
+			for _, dns := range systemDnsServers {
+				conn, err := d.DialContext(ctx, proto, dns)
+				if err == nil {
+					return conn, nil
+				}
+			}
+			return nil, fmt.Errorf("all system DNS (%s) failed", proto)
+		},
+	}
+}
+
 func cacheGet(host string) ([]string, bool) {
 	dnsCacheMu.RLock()
 	defer dnsCacheMu.RUnlock()
@@ -176,8 +199,9 @@ var udpDnsResolver = &net.Resolver{
 	},
 }
 
-// resolveHost тries DoH → TCP DNS → UDP DNS → system resolver.
-// Каждый шаг с коротким таймаутом чтобы быстро переходить к следующему.
+// resolveHost tries carrier DNS (UDP → TCP) → DoH → public UDP → system.
+// Carrier DNS first because mobile carriers often white-list DNS and block
+// ALL public resolvers (1.1.1.1, 8.8.8.8) on any port.
 func resolveHost(ctx context.Context, host string) ([]string, error) {
 	if ip := net.ParseIP(host); ip != nil {
 		return []string{host}, nil
@@ -186,7 +210,27 @@ func resolveHost(ctx context.Context, host string) ([]string, error) {
 		return cached, nil
 	}
 
-	// 1. DoH via HTTPS:443 — most reliable on mobile carriers.
+	// 1. Carrier DNS over UDP — works for any ISP that white-lists their DNS.
+	if len(systemDnsServers) > 0 {
+		sysUdpCtx, cancel := context.WithTimeout(ctx, 4*time.Second)
+		ips, err := makeSystemDnsResolver("udp").LookupHost(sysUdpCtx, host)
+		cancel()
+		if err == nil && len(ips) > 0 {
+			cachePut(host, ips, 5*time.Minute)
+			return ips, nil
+		}
+
+		// 1b. Carrier DNS over TCP (rare but possible).
+		sysTcpCtx, cancel2 := context.WithTimeout(ctx, 4*time.Second)
+		ips, err = makeSystemDnsResolver("tcp").LookupHost(sysTcpCtx, host)
+		cancel2()
+		if err == nil && len(ips) > 0 {
+			cachePut(host, ips, 5*time.Minute)
+			return ips, nil
+		}
+	}
+
+	// 2. DoH via HTTPS:443 to public resolvers.
 	dohCtx, cancel := context.WithTimeout(ctx, 8*time.Second)
 	ips, err := dohLookup(dohCtx, host)
 	cancel()
@@ -195,28 +239,28 @@ func resolveHost(ctx context.Context, host string) ([]string, error) {
 		return ips, nil
 	}
 
-	// 2. DNS over TCP:53 — some carriers allow TCP but not UDP.
-	tcpCtx, cancel2 := context.WithTimeout(ctx, 6*time.Second)
+	// 3. DNS over TCP:53 to public resolvers.
+	tcpCtx, cancel3 := context.WithTimeout(ctx, 6*time.Second)
 	ips, err = tcpDnsResolver.LookupHost(tcpCtx, host)
-	cancel2()
-	if err == nil && len(ips) > 0 {
-		cachePut(host, ips, 5*time.Minute)
-		return ips, nil
-	}
-
-	// 3. DNS over UDP:53 — works on unrestricted networks (Wi-Fi).
-	udpCtx, cancel3 := context.WithTimeout(ctx, 5*time.Second)
-	ips, err = udpDnsResolver.LookupHost(udpCtx, host)
 	cancel3()
 	if err == nil && len(ips) > 0 {
 		cachePut(host, ips, 5*time.Minute)
 		return ips, nil
 	}
 
-	// 4. Last resort — system resolver.
-	sysCtx, cancel4 := context.WithTimeout(ctx, 4*time.Second)
-	ips, err = net.DefaultResolver.LookupHost(sysCtx, host)
+	// 4. DNS over UDP:53 to public resolvers.
+	udpCtx, cancel4 := context.WithTimeout(ctx, 5*time.Second)
+	ips, err = udpDnsResolver.LookupHost(udpCtx, host)
 	cancel4()
+	if err == nil && len(ips) > 0 {
+		cachePut(host, ips, 5*time.Minute)
+		return ips, nil
+	}
+
+	// 5. System resolver as last resort.
+	sysCtx, cancel5 := context.WithTimeout(ctx, 4*time.Second)
+	ips, err = net.DefaultResolver.LookupHost(sysCtx, host)
+	cancel5()
 	if err == nil && len(ips) > 0 {
 		cachePut(host, ips, 1*time.Minute)
 		return ips, nil

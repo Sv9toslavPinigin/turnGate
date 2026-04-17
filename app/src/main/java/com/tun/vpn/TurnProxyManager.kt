@@ -1,6 +1,8 @@
 package com.tun.vpn
 
 import android.content.Context
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.util.Log
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -105,6 +107,40 @@ class TurnProxyManager(private val context: Context) {
         get() = File(context.applicationInfo.nativeLibraryDir, "libvkturnproxy.so")
 
     /**
+     * Получает DNS-серверы реальной (не-VPN) сети от Android OS.
+     * Мобильные операторы часто white-list'ят DNS — блокируют 1.1.1.1/8.8.8.8
+     * на всех портах, но свой собственный DNS всегда открыт абонентам.
+     *
+     * Вызывается ДО поднятия VPN туннеля, пока активная сеть ещё мобильная/Wi-Fi.
+     */
+    private fun collectSystemDnsServers(): List<String> {
+        return try {
+            val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+            val result = mutableListOf<String>()
+            for (network in cm.allNetworks) {
+                val caps = cm.getNetworkCapabilities(network) ?: continue
+                // Пропускаем VPN-сети — нам нужен реальный carrier DNS.
+                if (caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN)) continue
+                // Только активные интернет-сети.
+                if (!caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)) continue
+
+                val lp = cm.getLinkProperties(network) ?: continue
+                for (dns in lp.dnsServers) {
+                    val addr = dns.hostAddress ?: continue
+                    // IPv6 нужно обернуть в скобки для формата host:port.
+                    val formatted = if (addr.contains(':')) "[$addr]:53" else "$addr:53"
+                    if (formatted !in result) result.add(formatted)
+                }
+            }
+            Log.i(TAG, "System DNS servers: $result")
+            result
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to collect system DNS", e)
+            emptyList()
+        }
+    }
+
+    /**
      * Запустить vk-turn-proxy-client.
      *
      * @param serverAddress IP:PORT VPS сервера
@@ -142,6 +178,13 @@ class TurnProxyManager(private val context: Context) {
             )
             if (manualCaptcha) {
                 cmd.add("-manual-captcha")
+            }
+
+            // Передаём DNS carrier'а чтобы обойти white-list publics.
+            val systemDns = collectSystemDnsServers()
+            if (systemDns.isNotEmpty()) {
+                cmd.add("-dns")
+                cmd.add(systemDns.joinToString(","))
             }
             val cmdStr = cmd.joinToString(" ")
             Log.i(TAG, "Starting: $cmdStr")
