@@ -6,7 +6,9 @@ import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -98,61 +100,59 @@ fun CaptchaWebViewDialog(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .fillMaxHeight(0.9f)
+                .fillMaxHeight(0.95f)
                 .clip(RoundedCornerShape(20.dp))
                 .background(theme.bg1)
-                .padding(14.dp)
+                .padding(12.dp)
         ) {
             val t = LocalStrings.current
 
-            // Step dots header: Step N of ~M + current/total progress.
+            // Compact step header (label + progress + dots, all in one block).
             val total = totalEstimate.coerceAtLeast(1)
             val shown = captchaIndex.coerceAtLeast(1)
             CaptchaStepHeader(theme = theme, current = shown, total = total, label = t.captchaStepOf.format(shown, total))
 
-            Spacer(Modifier.height(10.dp))
+            Spacer(Modifier.height(8.dp))
 
-            // Title row with refresh/cancel
+            // Title row with refresh/cancel — hint goes INTO a horizontal
+            // scroll marquee below so it never breaks layout vertically.
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.Top
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = t.captchaTitle,
-                        color = theme.textPrimary,
-                        fontSize = 19.sp,
-                        fontWeight = FontWeight.Bold,
-                        fontFamily = FontDisplay
-                    )
-                    Text(
-                        text = t.captchaHint,
-                        color = theme.textSecondary,
-                        fontSize = 11.sp,
-                        fontFamily = FontBody,
-                        modifier = Modifier.padding(top = 3.dp)
-                    )
-                }
-                Spacer(Modifier.width(8.dp))
+                Text(
+                    text = t.captchaTitle,
+                    color = theme.textPrimary,
+                    fontSize = 17.sp,
+                    fontWeight = FontWeight.Bold,
+                    fontFamily = FontDisplay,
+                    modifier = Modifier.weight(1f)
+                )
                 OutlinedButton(
                     onClick = { webViewRef?.reload() },
                     shape = RoundedCornerShape(10.dp),
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 10.dp, vertical = 6.dp),
                     colors = ButtonDefaults.outlinedButtonColors(contentColor = theme.textSecondary)
                 ) {
-                    Text(t.refresh, fontSize = 12.sp)
+                    Text(t.refresh, fontSize = 11.sp)
                 }
                 Spacer(Modifier.width(6.dp))
                 Button(
                     onClick = onCancel,
                     shape = RoundedCornerShape(10.dp),
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 10.dp, vertical = 6.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = theme.error)
                 ) {
-                    Text(t.cancel, fontSize = 12.sp, color = Color.White)
+                    Text(t.cancel, fontSize = 11.sp, color = Color.White)
                 }
             }
 
-            Spacer(Modifier.height(10.dp))
+            Spacer(Modifier.height(4.dp))
+
+            // Hint: small single-line marquee (horizontally scrolling).
+            HintMarquee(text = t.captchaHint, color = theme.textTertiary)
+
+            Spacer(Modifier.height(8.dp))
 
             Box(
                 modifier = Modifier
@@ -305,6 +305,31 @@ private fun CaptchaStepHeader(theme: TgTheme, current: Int, total: Int, label: S
             }
         }
     }
+}
+
+/**
+ * Маленькая строка-бегущая подсказка: одна строка, горизонтальная прокрутка
+ * через LinearEasing. Разделяет текст точкой-пунктиром и зациклена.
+ */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun HintMarquee(text: String, color: Color) {
+    // basicMarquee — из foundation 1.7+; компактнее ручного цикла.
+    Text(
+        text = "  •  $text  •  $text",
+        color = color,
+        fontSize = 10.sp,
+        fontFamily = FontBody,
+        fontWeight = FontWeight.Medium,
+        maxLines = 1,
+        softWrap = false,
+        modifier = Modifier
+            .fillMaxWidth()
+            .basicMarquee(
+                iterations = Int.MAX_VALUE,
+                velocity = 28.dp
+            )
+    )
 }
 
 private const val CAPTCHA_URL = "http://localhost:8765"
