@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -34,6 +35,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -45,13 +47,7 @@ import kotlinx.coroutines.delay
 /**
  * Диалог с WebView для ручного решения капчи VK.
  *
- * Закрывается автоматически:
- * - когда body страницы содержит "Done!" (polling каждые 500ms);
- * - когда reload WebView падает с ERR_CONNECTION_REFUSED
- *   (proxy закрыл сервер — значит токен получен);
- * - когда proxy шлёт CaptchaSolved → ViewModel → onDismiss.
- *
- * @param captchaIndex 1-based номер текущей капчи в сессии (для UI).
+ * @param captchaIndex 1-based номер текущей капчи в сессии.
  * @param onDismiss    скрыть диалог — капча решена.
  * @param onCancel     пользователь явно отменил, нужен полный disconnect.
  */
@@ -62,6 +58,7 @@ fun CaptchaWebViewDialog(
     onDismiss: () -> Unit,
     onCancel: () -> Unit
 ) {
+    val theme = LocalTgTheme.current
     var webViewRef by remember { mutableStateOf<WebView?>(null) }
     var dismissed by remember { mutableStateOf(false) }
 
@@ -72,7 +69,6 @@ fun CaptchaWebViewDialog(
         }
     }
 
-    // Polling body.innerText каждые 500ms — надёжно ловит success-страницу.
     LaunchedEffect(Unit) {
         while (!dismissed) {
             delay(500)
@@ -100,56 +96,69 @@ fun CaptchaWebViewDialog(
             modifier = Modifier
                 .fillMaxWidth()
                 .fillMaxHeight(0.9f)
-                .clip(RoundedCornerShape(16.dp))
-                .background(Color(0xFF1E293B))
-                .padding(12.dp)
+                .clip(RoundedCornerShape(20.dp))
+                .background(theme.bg1)
+                .padding(14.dp)
         ) {
-            // Заголовок
+            // Progress bar at top — indeterminate, shows "something is happening"
+            if (captchaIndex > 0) {
+                LinearProgressIndicator(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(3.dp)
+                        .clip(RoundedCornerShape(2.dp)),
+                    color = theme.accent,
+                    trackColor = theme.surfaceBorder,
+                    strokeCap = StrokeCap.Round
+                )
+                Spacer(Modifier.height(12.dp))
+            }
+
+            // Header
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+                verticalAlignment = Alignment.Top
             ) {
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = if (captchaIndex > 0) "Captcha #$captchaIndex" else "Solve Captcha",
-                        color = Color(0xFFF1F5F9),
+                        text = if (captchaIndex > 0) "Step $captchaIndex of ~" else "Quick check",
+                        color = theme.textPrimary,
                         fontSize = 17.sp,
                         fontWeight = FontWeight.SemiBold
                     )
                     Text(
-                        text = "Multiple captchas may follow in sequence",
-                        color = Color(0xFF94A3B8),
-                        fontSize = 10.sp
+                        text = "VK may show several checks in a row. Sit tight.",
+                        color = theme.textSecondary,
+                        fontSize = 11.sp,
+                        modifier = Modifier.padding(top = 3.dp)
                     )
                 }
-                // Кнопка «Проверить» — reload страницы. Если proxy закрыл сервер
-                // (токен получен), onReceivedError закроет диалог.
+                Spacer(Modifier.width(8.dp))
                 OutlinedButton(
                     onClick = { webViewRef?.reload() },
-                    shape = RoundedCornerShape(8.dp)
+                    shape = RoundedCornerShape(10.dp),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = theme.textSecondary)
                 ) {
                     Text("Refresh", fontSize = 12.sp)
                 }
-                Spacer(modifier = Modifier.width(6.dp))
+                Spacer(Modifier.width(6.dp))
                 Button(
                     onClick = onCancel,
-                    shape = RoundedCornerShape(8.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = Color(0xFFEF4444)
-                    )
+                    shape = RoundedCornerShape(10.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = theme.error)
                 ) {
-                    Text("Cancel", fontSize = 12.sp)
+                    Text("Cancel", fontSize = 12.sp, color = Color.White)
                 }
             }
 
-            Spacer(modifier = Modifier.height(8.dp))
+            Spacer(Modifier.height(10.dp))
 
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
                     .weight(1f)
-                    .clip(RoundedCornerShape(8.dp))
+                    .clip(RoundedCornerShape(10.dp))
                     .background(Color.White)
             ) {
                 AndroidView(
@@ -179,8 +188,6 @@ fun CaptchaWebViewDialog(
                                     error: WebResourceError?
                                 ) {
                                     super.onReceivedError(view, request, error)
-                                    // Главный фрейм не грузится → сервер закрыт
-                                    // → proxy получил токен → капча решена.
                                     if (request?.isForMainFrame == true) {
                                         dismissOnce()
                                     }
@@ -199,9 +206,7 @@ fun CaptchaWebViewDialog(
     }
 
     DisposableEffect(Unit) {
-        onDispose {
-            webViewRef?.destroy()
-        }
+        onDispose { webViewRef?.destroy() }
     }
 }
 

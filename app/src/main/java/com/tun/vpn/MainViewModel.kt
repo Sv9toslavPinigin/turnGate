@@ -67,10 +67,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         _state.value = _state.value.copy(
                             statusText = "Waiting for captcha #${_captchaCount.value}…"
                         )
+                        LogStore.addFriendlyLog("VK asked for a check (#${_captchaCount.value})", LogLevel.WARNING)
                     }
                     is CaptchaEvent.CaptchaSolved -> {
                         _showCaptchaDialog.value = false
                         _state.value = _state.value.copy(statusText = "Captcha solved, continuing…")
+                        LogStore.addFriendlyLog("Check passed — continuing")
                     }
                     is CaptchaEvent.CaptchaFailed -> {
                         _showCaptchaDialog.value = false
@@ -83,17 +85,25 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             proxyManager.stage.collect { stage ->
                 if (_state.value.status == ConnectionState.CONNECTED) return@collect
-                val text = when (stage) {
-                    is ProxyStage.Starting -> "Starting proxy…"
-                    is ProxyStage.AuthConnecting -> "Authenticating with VK…"
-                    is ProxyStage.SolvingCaptcha -> "Solving captcha…"
-                    is ProxyStage.CaptchaSolved -> "Captcha solved, connecting…"
+                val (text, friendly) = when (stage) {
+                    is ProxyStage.Starting ->
+                        "Starting proxy…" to "Starting TurnGate"
+                    is ProxyStage.AuthConnecting ->
+                        "Authenticating with VK…" to "Reaching VK servers"
+                    is ProxyStage.SolvingCaptcha ->
+                        "Solving captcha…" to "Solving captcha automatically"
+                    is ProxyStage.CaptchaSolved ->
+                        "Captcha solved, connecting…" to "Captcha passed"
                     is ProxyStage.IdentityRegistered ->
-                        "Registered identity ${stage.current}/${stage.total}…"
-                    is ProxyStage.DtlsEstablished -> "DTLS established, allocating TURN…"
-                    is ProxyStage.TurnAllocated -> "TURN allocated, waiting for handshake…"
+                        "Registered identity ${stage.current}/${stage.total}…" to
+                            "Authenticating (${stage.current}/${stage.total})"
+                    is ProxyStage.DtlsEstablished ->
+                        "DTLS established, allocating TURN…" to "Establishing secure channel"
+                    is ProxyStage.TurnAllocated ->
+                        "TURN allocated, waiting for handshake…" to "Opening WireGuard tunnel"
                 }
                 _state.value = _state.value.copy(statusText = text)
+                LogStore.addFriendlyLog(friendly)
             }
         }
     }
@@ -204,6 +214,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             status = ConnectionState.CONNECTING,
             statusText = "Starting proxy..."
         )
+        LogStore.addFriendlyLog("Starting TurnGate")
 
         viewModelScope.launch(Dispatchers.IO) {
             _captchaCount.value = 0
@@ -266,6 +277,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         status = ConnectionState.CONNECTED,
                         statusText = "Connected"
                     )
+                    LogStore.addFriendlyLog("Connected — you are protected")
                     LogStore.addAppLog("VPN tunnel UP - handshake complete with ${profile.peerAddr}")
                     Log.i(TAG, "VPN tunnel UP with handshake")
                 } else {

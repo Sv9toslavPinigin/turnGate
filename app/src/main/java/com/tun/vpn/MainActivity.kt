@@ -10,8 +10,12 @@ import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
@@ -21,7 +25,6 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -29,17 +32,23 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalClipboardManager
-import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import kotlin.math.cos
+import kotlin.math.sin
 
 class MainActivity : ComponentActivity() {
 
@@ -58,41 +67,46 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-
-        // Deep link из intent
         pendingDeepLink = intent?.data?.toString()?.takeIf { it.startsWith("turnbridge://") }
 
         setContent {
-            TurnGateTheme {
-                val vm: MainViewModel = viewModel()
-                viewModelRef = vm
+            val context = LocalContext.current
+            val themeStore = remember { ThemeStore(context) }
+            var themeKey by remember { mutableStateOf(themeStore.themeKey) }
+            val theme = TgThemes.find { it.key == themeKey } ?: AuroraTheme
 
-                // Обработка deep link
-                LaunchedEffect(pendingDeepLink) {
-                    pendingDeepLink?.let {
-                        vm.importConfig(it)
-                        pendingDeepLink = null
-                    }
-                }
+            CompositionLocalProvider(LocalTgTheme provides theme) {
+                TurnGateTheme(theme) {
+                    val vm: MainViewModel = viewModel()
+                    viewModelRef = vm
 
-                // Инициализируем LogStore
-                LaunchedEffect(Unit) {
-                    LogStore.init(this@MainActivity)
-                }
-
-                MainApp(
-                    vm = vm,
-                    onConnect = { vmRef ->
-                        viewModelRef = vmRef
-                        val vpnIntent = VpnService.prepare(this)
-                        if (vpnIntent != null) {
-                            connectPending = true
-                            vpnPermissionLauncher.launch(vpnIntent)
-                        } else {
-                            vmRef.connect()
+                    LaunchedEffect(pendingDeepLink) {
+                        pendingDeepLink?.let {
+                            vm.importConfig(it)
+                            pendingDeepLink = null
                         }
                     }
-                )
+                    LaunchedEffect(Unit) { LogStore.init(this@MainActivity) }
+
+                    MainApp(
+                        vm = vm,
+                        themeKey = themeKey,
+                        onThemeChange = { key ->
+                            themeKey = key
+                            themeStore.themeKey = key
+                        },
+                        onConnect = { vmRef ->
+                            viewModelRef = vmRef
+                            val vpnIntent = VpnService.prepare(this)
+                            if (vpnIntent != null) {
+                                connectPending = true
+                                vpnPermissionLauncher.launch(vpnIntent)
+                            } else {
+                                vmRef.connect()
+                            }
+                        }
+                    )
+                }
             }
         }
     }
@@ -108,48 +122,38 @@ class MainActivity : ComponentActivity() {
 
 // ===== Navigation =====
 
-enum class Screen {
-    HOME, SETTINGS, LOGS, ABOUT, PROFILE_EDIT
-}
+enum class Screen { HOME, SETTINGS, LOGS, ABOUT, PROFILE_EDIT }
 
-// ===== Theme =====
-
-private val DarkBlue = Color(0xFF0D1B2A)
-private val DeepBlue = Color(0xFF1B2838)
-private val CardDark = Color(0xFF1E293B)
-private val AccentBlue = Color(0xFF3B82F6)
-private val AccentCyan = Color(0xFF06B6D4)
-private val AccentGreen = Color(0xFF10B981)
-private val AccentRed = Color(0xFFEF4444)
-private val AccentOrange = Color(0xFFF59E0B)
-private val TextPrimary = Color(0xFFF1F5F9)
-private val TextSecondary = Color(0xFF94A3B8)
+// ===== Theme wrapper =====
 
 @Composable
-fun TurnGateTheme(content: @Composable () -> Unit) {
+fun TurnGateTheme(tg: TgTheme, content: @Composable () -> Unit) {
     MaterialTheme(
         colorScheme = darkColorScheme(
-            primary = AccentBlue,
-            secondary = AccentCyan,
-            background = DarkBlue,
-            surface = CardDark,
+            primary = tg.accent,
+            secondary = tg.accent2,
+            background = tg.bg0,
+            surface = tg.surface,
             onPrimary = Color.White,
-            onBackground = TextPrimary,
-            onSurface = TextPrimary,
-            onSurfaceVariant = TextSecondary,
-            error = AccentRed
+            onBackground = tg.textPrimary,
+            onSurface = tg.textPrimary,
+            onSurfaceVariant = tg.textSecondary,
+            error = tg.error
         ),
         content = content
     )
 }
 
-// ===== Main App with Navigation =====
+// ===== Main App =====
 
 @Composable
 fun MainApp(
     vm: MainViewModel = viewModel(),
+    themeKey: String,
+    onThemeChange: (String) -> Unit,
     onConnect: (MainViewModel) -> Unit
 ) {
+    val theme = LocalTgTheme.current
     val state by vm.state.collectAsStateWithLifecycle()
     val showCaptcha by vm.showCaptchaDialog.collectAsStateWithLifecycle()
     var currentScreen by remember { mutableStateOf(Screen.HOME) }
@@ -159,9 +163,7 @@ fun MainApp(
         modifier = Modifier
             .fillMaxSize()
             .background(
-                Brush.verticalGradient(
-                    colors = listOf(DarkBlue, DeepBlue, Color(0xFF0F172A))
-                )
+                Brush.verticalGradient(colors = listOf(theme.bg1, theme.bg0, theme.bg2))
             )
     ) {
         when (currentScreen) {
@@ -179,18 +181,14 @@ fun MainApp(
             Screen.SETTINGS -> GlobalSettingsScreen(
                 onBack = { currentScreen = Screen.HOME },
                 onLogsClick = { currentScreen = Screen.LOGS },
-                onAboutClick = { currentScreen = Screen.ABOUT }
+                onAboutClick = { currentScreen = Screen.ABOUT },
+                themeKey = themeKey,
+                onThemeChange = onThemeChange
             )
-            Screen.LOGS -> LogViewScreen(
-                onBack = { currentScreen = Screen.SETTINGS }
-            )
-            Screen.ABOUT -> AboutScreen(
-                onBack = { currentScreen = Screen.SETTINGS }
-            )
+            Screen.LOGS -> LogViewScreen(onBack = { currentScreen = Screen.SETTINGS })
+            Screen.ABOUT -> AboutScreen(onBack = { currentScreen = Screen.SETTINGS })
             Screen.PROFILE_EDIT -> {
-                val profile = editingProfileId?.let { id ->
-                    state.profiles.find { it.id == id }
-                }
+                val profile = editingProfileId?.let { id -> state.profiles.find { it.id == id } }
                 if (profile != null) {
                     ProfileEditScreen(
                         profile = profile,
@@ -207,7 +205,6 @@ fun MainApp(
             }
         }
 
-        // Captcha WebView overlay
         if (showCaptcha) {
             val captchaIdx by vm.captchaCount.collectAsStateWithLifecycle()
             CaptchaWebViewDialog(
@@ -230,6 +227,7 @@ fun HomeScreen(
     onSettingsClick: () -> Unit,
     onEditProfile: (String) -> Unit
 ) {
+    val theme = LocalTgTheme.current
     val update by vm.updateInfo.collectAsStateWithLifecycle()
     val clipboardManager = LocalClipboardManager.current
     val isConnected = state.status == ConnectionState.CONNECTED
@@ -242,189 +240,121 @@ fun HomeScreen(
         modifier = Modifier
             .fillMaxSize()
             .statusBarsPadding()
-            .padding(horizontal = 24.dp),
+            .padding(horizontal = 20.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         // Top bar
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(top = 16.dp),
+                .padding(top = 12.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Import button
-            IconButton(
-                onClick = { showImportModal = true },
-                enabled = !isConnected && !isBusy
-            ) {
-                Icon(Icons.Filled.Add, contentDescription = "Import", tint = TextSecondary)
+            IconButton(onClick = { showImportModal = true }, enabled = !isConnected && !isBusy) {
+                Icon(Icons.Filled.Add, "Import", tint = if (!isConnected && !isBusy) theme.accent else theme.textTertiary)
             }
-
-            // Settings
+            // TurnGate title
+            Text(
+                text = "TurnGate",
+                fontSize = 38.sp,
+                fontWeight = FontWeight.Black,
+                style = MaterialTheme.typography.headlineLarge.copy(
+                    brush = Brush.linearGradient(colors = listOf(theme.accent, theme.accent2))
+                )
+            )
             IconButton(onClick = onSettingsClick) {
-                Icon(Icons.Filled.Settings, contentDescription = "Settings", tint = TextSecondary)
+                Icon(Icons.Filled.Settings, "Settings", tint = theme.textSecondary)
             }
         }
 
-        // Title
-        Text(
-            text = "TurnGate",
-            fontSize = 42.sp,
-            fontWeight = FontWeight.Black,
-            modifier = Modifier.padding(top = 12.dp),
-            style = MaterialTheme.typography.headlineLarge.copy(
-                brush = Brush.linearGradient(colors = listOf(AccentBlue, AccentCyan))
-            )
-        )
-
         // Update banner
         update?.let { info ->
-            Spacer(modifier = Modifier.height(8.dp))
+            Spacer(Modifier.height(6.dp))
             Surface(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .shadow(6.dp, RoundedCornerShape(14.dp), spotColor = AccentGreen.copy(alpha = 0.4f)),
+                    .shadow(6.dp, RoundedCornerShape(14.dp), spotColor = theme.connected.copy(alpha = 0.3f)),
                 shape = RoundedCornerShape(14.dp),
-                color = AccentGreen.copy(alpha = 0.15f),
+                color = theme.connected.copy(alpha = 0.12f),
                 onClick = { vm.downloadUpdate() }
             ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Icon(
-                        Icons.Filled.ArrowDropDown,
-                        contentDescription = null,
-                        tint = AccentGreen,
-                        modifier = Modifier
-                            .size(20.dp)
-                            .padding(end = 4.dp)
-                    )
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = "Update available",
-                            color = AccentGreen,
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                        Text(
-                            text = "v${info.versionName} · tap to install",
-                            color = AccentGreen.copy(alpha = 0.75f),
-                            fontSize = 11.sp
-                        )
+                Row(Modifier.padding(horizontal = 16.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Update available", color = theme.connected, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                        Text("v${info.versionName} · tap to install", color = theme.connected.copy(alpha = 0.75f), fontSize = 11.sp)
                     }
-                    Text(
-                        text = "↓",
-                        color = AccentGreen,
-                        fontSize = 18.sp,
-                        fontWeight = FontWeight.Bold
-                    )
+                    Text("↓", color = theme.connected, fontSize = 18.sp, fontWeight = FontWeight.Bold)
                 }
             }
         }
 
-        // Profile picker
+        // Profile carousel
         if (state.profiles.isNotEmpty()) {
-            Spacer(modifier = Modifier.height(12.dp))
-            ProfilePicker(
+            Spacer(Modifier.height(14.dp))
+            ProfileCarousel(
                 profiles = state.profiles,
                 selectedId = state.selectedProfileId,
                 enabled = !isConnected && !isBusy,
                 onSelect = { vm.selectProfile(it) },
                 onEdit = onEditProfile
             )
-
-            // Manual captcha toggle
-            val selectedProfile = state.profiles.find { it.id == state.selectedProfileId }
-            if (selectedProfile != null && !isConnected && !isBusy) {
-                Row(
-                    modifier = Modifier.padding(top = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Checkbox(
-                        checked = selectedProfile.manualCaptcha,
-                        onCheckedChange = {
-                            vm.updateProfile(selectedProfile.copy(manualCaptcha = it))
-                        },
-                        colors = CheckboxDefaults.colors(
-                            checkedColor = AccentBlue,
-                            uncheckedColor = TextSecondary
-                        )
-                    )
-                    Text(
-                        text = "Manual captcha",
-                        color = TextSecondary,
-                        fontSize = 13.sp
-                    )
-                }
-            }
         }
 
-        Spacer(modifier = Modifier.weight(1f))
+        Spacer(Modifier.weight(1f))
 
-        // Shield icon
-        ShieldIcon(state.status)
+        // Tunnel hero
+        TunnelHero(status = state.status, sizeDp = 240.dp)
 
-        Spacer(modifier = Modifier.height(20.dp))
+        Spacer(Modifier.height(16.dp))
 
-        // Status text with optional progress indicator
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.Center
-        ) {
+        // Status text
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center) {
             if (isBusy) {
                 CircularProgressIndicator(
                     modifier = Modifier.size(14.dp),
                     strokeWidth = 2.dp,
-                    color = AccentOrange
+                    color = theme.connecting
                 )
-                Spacer(modifier = Modifier.width(10.dp))
+                Spacer(Modifier.width(10.dp))
             }
             Text(
                 text = state.statusText,
                 color = when (state.status) {
-                    ConnectionState.CONNECTED -> AccentGreen
-                    ConnectionState.CONNECTING, ConnectionState.DISCONNECTING -> AccentOrange
-                    ConnectionState.ERROR -> AccentRed
-                    else -> TextSecondary
+                    ConnectionState.CONNECTED -> theme.connected
+                    ConnectionState.CONNECTING, ConnectionState.DISCONNECTING -> theme.connecting
+                    ConnectionState.ERROR -> theme.error
+                    else -> theme.textSecondary
                 },
                 fontSize = 14.sp,
                 fontWeight = FontWeight.Medium
             )
         }
 
-        // Proxy logs panel
-        if (state.proxyLogs.isNotEmpty()) {
-            Spacer(modifier = Modifier.height(16.dp))
-            ProxyLogPanel(state.proxyLogs)
+        // Proxy log panel (raw, small, during connecting)
+        if (state.proxyLogs.isNotEmpty() && (isBusy || isConnected)) {
+            Spacer(Modifier.height(12.dp))
+            ProxyLogPanel(logs = state.proxyLogs, theme = theme)
         }
 
-        Spacer(modifier = Modifier.weight(1f))
+        Spacer(Modifier.weight(1f))
 
         // Connect button
         ConnectButton(
-            isConnected = isConnected,
-            isConnecting = isConnecting,
-            isBusy = isBusy,
+            status = state.status,
             enabled = state.profiles.isNotEmpty(),
-            onClick = {
-                if (isConnected) onDisconnect() else onConnect()
-            }
+            onClick = { if (isConnected) onDisconnect() else onConnect() }
         )
 
-        Spacer(modifier = Modifier.height(48.dp))
+        Spacer(Modifier.height(40.dp))
     }
 
-    // Import modal
     if (showImportModal) {
         ImportModal(
             onPasteFromClipboard = {
                 showImportModal = false
                 val clip = clipboardManager.getText()?.text ?: ""
-                if (clip.startsWith("turnbridge://")) {
-                    vm.importConfig(clip)
-                }
+                if (clip.startsWith("turnbridge://")) vm.importConfig(clip)
             },
             onAddManually = {
                 showImportModal = false
@@ -436,64 +366,82 @@ fun HomeScreen(
     }
 }
 
-// ===== Profile Picker =====
+// ===== Profile Carousel =====
 
 @Composable
-fun ProfilePicker(
+fun ProfileCarousel(
     profiles: List<VpnProfile>,
     selectedId: String?,
     enabled: Boolean,
     onSelect: (String) -> Unit,
     onEdit: (String) -> Unit
 ) {
-    var expanded by remember { mutableStateOf(false) }
-    val selected = profiles.find { it.id == selectedId } ?: profiles.firstOrNull()
-
-    Box {
-        OutlinedButton(
-            onClick = { if (enabled) expanded = true },
-            enabled = enabled,
-            shape = RoundedCornerShape(12.dp),
-            colors = ButtonDefaults.outlinedButtonColors(contentColor = TextPrimary)
-        ) {
-            Text(
-                text = selected?.name ?: "No profiles",
-                fontSize = 14.sp,
-                modifier = Modifier.weight(1f, fill = false)
-            )
-            Icon(
-                Icons.Filled.ArrowDropDown,
-                contentDescription = null,
-                tint = TextSecondary,
-                modifier = Modifier.size(20.dp)
-            )
-        }
-
-        DropdownMenu(
-            expanded = expanded,
-            onDismissRequest = { expanded = false }
-        ) {
-            profiles.forEach { profile ->
-                DropdownMenuItem(
-                    text = {
+    val theme = LocalTgTheme.current
+    LazyRow(
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        contentPadding = PaddingValues(horizontal = 2.dp)
+    ) {
+        items(profiles, key = { it.id }) { profile ->
+            val isSelected = profile.id == selectedId
+            Box(
+                modifier = Modifier
+                    .width(140.dp)
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(
+                        if (isSelected) theme.accent.copy(alpha = 0.12f) else theme.surface
+                    )
+                    .border(
+                        width = if (isSelected) 1.5.dp else 1.dp,
+                        color = if (isSelected) theme.accent.copy(alpha = 0.7f) else theme.surfaceBorder,
+                        shape = RoundedCornerShape(16.dp)
+                    )
+                    .then(
+                        if (enabled) Modifier.clickable(
+                            indication = null,
+                            interactionSource = remember { MutableInteractionSource() }
+                        ) { onSelect(profile.id) } else Modifier
+                    )
+                    .padding(12.dp)
+            ) {
+                Column {
+                    // First letter avatar
+                    Box(
+                        modifier = Modifier
+                            .size(36.dp)
+                            .clip(CircleShape)
+                            .background(
+                                if (isSelected) theme.accent.copy(alpha = 0.2f)
+                                else theme.surfaceBorder
+                            ),
+                        contentAlignment = Alignment.Center
+                    ) {
                         Text(
-                            profile.name,
-                            fontWeight = if (profile.id == selectedId) FontWeight.Bold else FontWeight.Normal
+                            text = profile.name.take(1).uppercase(),
+                            color = if (isSelected) theme.accent else theme.textSecondary,
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Bold
                         )
-                    },
-                    onClick = {
-                        onSelect(profile.id)
-                        expanded = false
-                    },
-                    trailingIcon = {
-                        TextButton(onClick = {
-                            expanded = false
-                            onEdit(profile.id)
-                        }) {
-                            Text("Edit", fontSize = 12.sp, color = AccentBlue)
-                        }
                     }
-                )
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        text = profile.name,
+                        color = if (isSelected) theme.textPrimary else theme.textSecondary,
+                        fontSize = 13.sp,
+                        fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
+                        maxLines = 1
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        text = "Edit",
+                        color = theme.accent,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Medium,
+                        modifier = Modifier.clickable(
+                            indication = null,
+                            interactionSource = remember { MutableInteractionSource() }
+                        ) { if (enabled) onEdit(profile.id) }
+                    )
+                }
             }
         }
     }
@@ -507,31 +455,28 @@ fun ImportModal(
     onAddManually: () -> Unit,
     onDismiss: () -> Unit
 ) {
+    val theme = LocalTgTheme.current
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Add Profile") },
+        title = { Text("Add profile", color = theme.textPrimary) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(
                     onClick = onPasteFromClipboard,
                     modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(12.dp)
-                ) {
-                    Text("Paste from Clipboard")
-                }
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = theme.accent)
+                ) { Text("Paste from clipboard", color = Color.White) }
                 OutlinedButton(
                     onClick = onAddManually,
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(12.dp)
-                ) {
-                    Text("Add Manually")
-                }
+                ) { Text("Configure manually", color = theme.textPrimary) }
             }
         },
         confirmButton = {},
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Cancel") }
-        }
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel", color = theme.textSecondary) } },
+        containerColor = theme.bg1
     )
 }
 
@@ -543,69 +488,170 @@ fun GlobalSettingsScreen(
     onBack: () -> Unit,
     onLogsClick: () -> Unit,
     onAboutClick: () -> Unit,
+    themeKey: String,
+    onThemeChange: (String) -> Unit,
     vm: MainViewModel = viewModel()
 ) {
+    val theme = LocalTgTheme.current
     val update by vm.updateInfo.collectAsStateWithLifecycle()
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .statusBarsPadding()
-    ) {
+
+    Column(modifier = Modifier.fillMaxSize().statusBarsPadding()) {
         TopAppBar(
-            title = { Text("Settings") },
+            title = { Text("Settings", color = theme.textPrimary) },
             navigationIcon = {
                 IconButton(onClick = onBack) {
-                    Icon(
-                        Icons.AutoMirrored.Filled.ArrowBack,
-                        contentDescription = "Back",
-                        tint = AccentBlue
-                    )
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = theme.accent)
                 }
             },
             colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent)
         )
 
         Column(
-            modifier = Modifier.padding(horizontal = 24.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 20.dp),
+            verticalArrangement = Arrangement.spacedBy(0.dp)
         ) {
+            // Appearance section
+            SectionLabel("Appearance")
+            ThemePicker(themeKey = themeKey, onThemeChange = onThemeChange)
+
+            Spacer(Modifier.height(24.dp))
             SectionLabel("Navigation")
 
-            OutlinedButton(
-                onClick = onLogsClick,
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(12.dp)
-            ) {
-                Text("View Logs")
-            }
-
-            OutlinedButton(
-                onClick = onAboutClick,
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(12.dp)
-            ) {
-                Text("About")
-            }
-
-            Spacer(modifier = Modifier.height(16.dp))
-            SectionLabel("Updates")
+            SettingsNavRow(
+                icon = { Icon(Icons.Filled.ArrowDropDown, null, tint = theme.accent, modifier = Modifier.size(20.dp)) },
+                title = "Activity & logs",
+                subtitle = "See what's happening under the hood",
+                onClick = onLogsClick
+            )
+            Spacer(Modifier.height(8.dp))
+            SettingsNavRow(
+                icon = { Icon(Icons.Filled.Settings, null, tint = theme.accent, modifier = Modifier.size(20.dp)) },
+                title = "About TurnGate",
+                subtitle = "Version, credits, source",
+                onClick = onAboutClick
+            )
 
             if (update != null) {
+                Spacer(Modifier.height(24.dp))
+                SectionLabel("Updates")
                 Button(
                     onClick = { vm.downloadUpdate() },
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(12.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = AccentGreen)
+                    colors = ButtonDefaults.buttonColors(containerColor = theme.connected)
+                ) { Text("Download v${update!!.versionName}", color = Color.Black) }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SettingsNavRow(icon: @Composable () -> Unit, title: String, subtitle: String, onClick: () -> Unit) {
+    val theme = LocalTgTheme.current
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
+            .background(theme.surface)
+            .border(1.dp, theme.surfaceBorder, RoundedCornerShape(14.dp))
+            .clickable(indication = null, interactionSource = remember { MutableInteractionSource() }) { onClick() }
+            .padding(16.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(14.dp)
+    ) {
+        Box(
+            modifier = Modifier
+                .size(36.dp)
+                .clip(RoundedCornerShape(10.dp))
+                .background(theme.accent.copy(alpha = 0.12f)),
+            contentAlignment = Alignment.Center
+        ) { icon() }
+        Column(Modifier.weight(1f)) {
+            Text(title, color = theme.textPrimary, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+            Text(subtitle, color = theme.textSecondary, fontSize = 12.sp)
+        }
+        Icon(Icons.Filled.ArrowDropDown, null, tint = theme.textTertiary,
+             modifier = Modifier.size(16.dp).graphicsLayer { rotationZ = -90f })
+    }
+}
+
+// ===== Theme Picker =====
+
+@Composable
+fun ThemePicker(themeKey: String, onThemeChange: (String) -> Unit) {
+    val currentTheme = LocalTgTheme.current
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        TgThemes.forEach { th ->
+            val active = themeKey == th.key
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(
+                        if (active) Brush.linearGradient(listOf(th.accent.copy(alpha = 0.12f), th.accent2.copy(alpha = 0.08f)))
+                        else Brush.linearGradient(listOf(currentTheme.surface, currentTheme.surface))
+                    )
+                    .border(
+                        width = if (active) 1.5.dp else 1.dp,
+                        color = if (active) th.accent.copy(alpha = 0.7f) else currentTheme.surfaceBorder,
+                        shape = RoundedCornerShape(14.dp)
+                    )
+                    .clickable(indication = null, interactionSource = remember { MutableInteractionSource() }) { onThemeChange(th.key) }
+                    .padding(12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(14.dp)
+            ) {
+                // Mini preview tile
+                Box(
+                    modifier = Modifier
+                        .size(54.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(th.bg0)
+                        .border(1.dp, th.surfaceBorder, RoundedCornerShape(12.dp)),
+                    contentAlignment = Alignment.Center
                 ) {
-                    Text("Download v${update!!.versionName}")
+                    Canvas(Modifier.size(54.dp)) {
+                        val cx = size.width / 2f
+                        val cy = size.height / 2f
+                        listOf(22f, 15f, 7f).forEachIndexed { i, r ->
+                            drawCircle(color = th.accent.copy(alpha = 0.5f - i * 0.1f), radius = r, center = Offset(cx, cy), style = Stroke(1.5f))
+                        }
+                        drawCircle(
+                            brush = Brush.radialGradient(listOf(th.accent, th.accent2), center = Offset(cx, cy), radius = 7f),
+                            radius = 7f, center = Offset(cx, cy)
+                        )
+                    }
                 }
-            } else {
-                OutlinedButton(
-                    onClick = { vm.checkForUpdates() },
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(12.dp)
+                // Name and subtitle
+                Column(Modifier.weight(1f)) {
+                    Text(th.name, color = if (active) th.accent else currentTheme.textPrimary,
+                         fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                    Text(th.themeSub, color = currentTheme.textSecondary, fontSize = 11.sp)
+                    // Color swatches
+                    Row(Modifier.padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        listOf(th.accent, th.accent2, th.connected).forEach { c ->
+                            Box(Modifier.size(width = 16.dp, height = 4.dp).clip(RoundedCornerShape(2.dp)).background(c))
+                        }
+                    }
+                }
+                // Radio indicator
+                Box(
+                    modifier = Modifier
+                        .size(22.dp)
+                        .clip(CircleShape)
+                        .background(if (active) th.accent else Color.Transparent)
+                        .border(1.5.dp, if (active) th.accent else currentTheme.surfaceBorder, CircleShape),
+                    contentAlignment = Alignment.Center
                 ) {
-                    Text("Check for Updates")
+                    if (active) {
+                        Canvas(Modifier.size(12.dp)) {
+                            val s = size.width
+                            drawLine(Color.Black, Offset(s * 0.2f, s * 0.55f), Offset(s * 0.42f, s * 0.78f), 2f, StrokeCap.Round)
+                            drawLine(Color.Black, Offset(s * 0.42f, s * 0.78f), Offset(s * 0.8f, s * 0.28f), 2f, StrokeCap.Round)
+                        }
+                    }
                 }
             }
         }
@@ -615,155 +661,243 @@ fun GlobalSettingsScreen(
 // ===== Proxy Log Panel =====
 
 @Composable
-fun ProxyLogPanel(logs: List<String>) {
+fun ProxyLogPanel(logs: List<String>, theme: TgTheme) {
     val listState = rememberLazyListState()
-    LaunchedEffect(logs.size) {
-        if (logs.isNotEmpty()) {
-            listState.scrollToItem(logs.size - 1)
-        }
-    }
+    LaunchedEffect(logs.size) { if (logs.isNotEmpty()) listState.scrollToItem(logs.size - 1) }
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .height(120.dp)
+            .height(100.dp)
             .clip(RoundedCornerShape(10.dp))
-            .background(Color(0xFF0A0F1A))
+            .background(theme.logSurface)
             .padding(8.dp)
     ) {
         LazyColumn(state = listState) {
             items(logs) { line ->
-                Text(
-                    text = line,
-                    color = Color(0xFF7DD3FC),
-                    fontSize = 10.sp,
-                    fontFamily = FontFamily.Monospace,
-                    lineHeight = 14.sp
-                )
+                Text(line, color = theme.logText, fontSize = 10.sp, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace, lineHeight = 14.sp)
             }
         }
     }
 }
 
-// ===== Shield Icon with glow =====
+// ===== TG Monogram (Canvas) =====
 
 @Composable
-fun ShieldIcon(status: ConnectionState) {
-    val iconColor by animateColorAsState(
-        targetValue = when (status) {
-            ConnectionState.CONNECTED -> AccentGreen
-            ConnectionState.CONNECTING, ConnectionState.DISCONNECTING -> AccentOrange
-            ConnectionState.ERROR -> AccentRed
-            ConnectionState.DISCONNECTED -> TextSecondary
-        },
-        animationSpec = tween(500),
-        label = "iconColor"
-    )
-
-    val glowAlpha by animateFloatAsState(
-        targetValue = when (status) {
-            ConnectionState.CONNECTED -> 0.45f
-            ConnectionState.CONNECTING, ConnectionState.DISCONNECTING -> 0.25f
-            else -> 0f
-        },
-        animationSpec = tween(800),
-        label = "glowAlpha"
-    )
-
-    val infiniteTransition = rememberInfiniteTransition(label = "pulse")
-    val pulseScale by infiniteTransition.animateFloat(
-        initialValue = 1f,
-        targetValue = 1.12f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(1200, easing = EaseInOut),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "pulseScale"
-    )
-
-    val breathScale by infiniteTransition.animateFloat(
-        initialValue = 1f,
-        targetValue = 1.04f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(2400, easing = EaseInOut),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "breathScale"
-    )
-
-    val scale = when (status) {
-        ConnectionState.CONNECTING, ConnectionState.DISCONNECTING -> pulseScale
-        ConnectionState.CONNECTED -> breathScale
-        else -> 1f
+fun TGMonogram(sizeDp: Dp) {
+    val theme = LocalTgTheme.current
+    Canvas(modifier = Modifier.size(sizeDp)) {
+        val s = size.width
+        val strokeW = s * 0.104f
+        val cx = s / 2f
+        val cy = s / 2f
+        val gRadius = s * 0.333f
+        // G arc — nearly full circle from east, 306° clockwise
+        drawArc(
+            color = theme.accent,
+            startAngle = 0f,
+            sweepAngle = 306f,
+            useCenter = false,
+            topLeft = Offset(cx - gRadius, cy - gRadius),
+            size = Size(gRadius * 2, gRadius * 2),
+            style = Stroke(width = strokeW, cap = StrokeCap.Round)
+        )
+        // G bar — horizontal line from east toward center
+        drawLine(
+            color = theme.accent,
+            start = Offset(cx + gRadius, cy),
+            end = Offset(cx + gRadius * 0.375f, cy),
+            strokeWidth = strokeW,
+            cap = StrokeCap.Round
+        )
+        // T crossbar
+        drawLine(
+            color = theme.textPrimary.copy(alpha = 0.92f),
+            start = Offset(s * 0.292f, s * 0.292f),
+            end = Offset(s * 0.708f, s * 0.292f),
+            strokeWidth = strokeW,
+            cap = StrokeCap.Round
+        )
+        // T stem
+        drawLine(
+            color = theme.textPrimary.copy(alpha = 0.92f),
+            start = Offset(cx, s * 0.292f),
+            end = Offset(cx, s * 0.708f),
+            strokeWidth = strokeW,
+            cap = StrokeCap.Round
+        )
     }
+}
 
-    // Rotating orbit ring for CONNECTING
-    val orbitAngle by infiniteTransition.animateFloat(
-        initialValue = 0f,
-        targetValue = 360f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(2000, easing = LinearEasing)
-        ),
-        label = "orbitAngle"
+// ===== Tunnel Hero =====
+
+@Composable
+fun TunnelHero(status: ConnectionState, sizeDp: Dp = 240.dp) {
+    val theme = LocalTgTheme.current
+    val isConnected = status == ConnectionState.CONNECTED
+    val isConnecting = status == ConnectionState.CONNECTING || status == ConnectionState.DISCONNECTING
+    val isError = status == ConnectionState.ERROR
+
+    val coreColor by animateColorAsState(
+        targetValue = when {
+            isError -> theme.error
+            isConnected -> theme.connected
+            isConnecting -> theme.connecting
+            else -> theme.textTertiary
+        },
+        animationSpec = tween(500), label = "core"
+    )
+    val ringColor by animateColorAsState(
+        targetValue = when {
+            isConnected -> theme.connected
+            isError -> theme.error
+            isConnecting -> theme.connecting
+            else -> Color.White
+        },
+        animationSpec = tween(500), label = "ring"
+    )
+    val ringAlpha = when {
+        isConnected -> 0.85f; isConnecting -> 0.7f; isError -> 0.7f; else -> 0.35f
+    }
+    val glowAlpha by animateFloatAsState(
+        targetValue = if (isConnected || isConnecting || isError) 1f else 0f,
+        animationSpec = tween(600), label = "glow"
     )
 
-    Box(contentAlignment = Alignment.Center, modifier = Modifier.size(200.dp)) {
-        if (glowAlpha > 0f) {
+    val infiniteTransition = rememberInfiniteTransition(label = "tunnel")
+    val pulseScale by infiniteTransition.animateFloat(1f, 1.08f,
+        infiniteRepeatable(tween(1800, easing = EaseInOut), RepeatMode.Reverse), "pulse")
+    val breatheScale by infiniteTransition.animateFloat(1f, 1.025f,
+        infiniteRepeatable(tween(3500, easing = EaseInOut), RepeatMode.Reverse), "breathe")
+    val spinAngle by infiniteTransition.animateFloat(0f, 360f,
+        infiniteRepeatable(tween(2000, easing = LinearEasing)), "spin")
+    val orbitA by infiniteTransition.animateFloat(0f, 360f,
+        infiniteRepeatable(tween(5000, easing = LinearEasing)), "oA")
+    val orbitB by infiniteTransition.animateFloat(0f, 360f,
+        infiniteRepeatable(tween(6700, easing = LinearEasing)), "oB")
+    val pAlpha by infiniteTransition.animateFloat(0.4f, 1f,
+        infiniteRepeatable(tween(2000, easing = EaseInOut), RepeatMode.Reverse), "pa")
+
+    val ringScale = when {
+        isConnecting -> pulseScale; isConnected -> breatheScale; else -> 1f
+    }
+    val discSize = sizeDp * 0.38f
+
+    Box(modifier = Modifier.size(sizeDp), contentAlignment = Alignment.Center) {
+        // Radial glow backdrop
+        if (glowAlpha > 0.01f) {
             Box(
                 modifier = Modifier
-                    .size(180.dp)
-                    .blur(50.dp)
+                    .size(sizeDp * 0.7f)
+                    .blur(32.dp)
                     .clip(CircleShape)
-                    .background(iconColor.copy(alpha = glowAlpha))
+                    .background(coreColor.copy(alpha = 0.28f * glowAlpha))
             )
         }
 
-        // Orbit ring while CONNECTING
-        if (status == ConnectionState.CONNECTING || status == ConnectionState.DISCONNECTING) {
-            Canvas(modifier = Modifier.size(150.dp)) {
-                drawArc(
-                    color = iconColor,
-                    startAngle = orbitAngle,
-                    sweepAngle = 90f,
-                    useCenter = false,
-                    style = Stroke(width = 3.dp.toPx(), cap = StrokeCap.Round)
-                )
-                drawArc(
-                    color = iconColor.copy(alpha = 0.3f),
-                    startAngle = orbitAngle + 180f,
-                    sweepAngle = 60f,
-                    useCenter = false,
-                    style = Stroke(width = 3.dp.toPx(), cap = StrokeCap.Round)
+        // Concentric rings
+        Canvas(modifier = Modifier.size(sizeDp)) {
+            listOf(0.5f, 0.72f, 0.92f).forEachIndexed { i, fraction ->
+                drawCircle(
+                    color = ringColor.copy(alpha = ringAlpha * (1f - i * 0.2f)),
+                    radius = size.width / 2f * fraction * ringScale,
+                    style = Stroke(width = 1.dp.toPx())
                 )
             }
         }
 
-        Icon(
-            Icons.Filled.Shield,
-            contentDescription = "VPN Status",
-            tint = iconColor,
-            modifier = Modifier.size((120 * scale).dp)
-        )
+        // Orbiting particles (when connecting or connected)
+        if (isConnected || isConnecting) {
+            val particleColor = if (isConnected) theme.connected else theme.connecting
+            // Track 1 — inner
+            Canvas(modifier = Modifier.size(sizeDp)) {
+                val r = size.width / 2f * 0.5f
+                for (i in 0..2) {
+                    val rad = Math.toRadians((orbitA + i * 120.0))
+                    val cx = center.x + r * cos(rad).toFloat()
+                    val cy = center.y + r * sin(rad).toFloat()
+                    drawCircle(color = particleColor.copy(alpha = pAlpha * (1f - i * 0.15f)), radius = 3f, center = Offset(cx, cy))
+                }
+            }
+            // Track 2 — mid, reverse
+            Canvas(modifier = Modifier.size(sizeDp)) {
+                val r = size.width / 2f * 0.72f
+                for (i in 0..2) {
+                    val rad = Math.toRadians((-orbitB + i * 120.0))
+                    val cx = center.x + r * cos(rad).toFloat()
+                    val cy = center.y + r * sin(rad).toFloat()
+                    drawCircle(color = particleColor.copy(alpha = pAlpha * 0.7f * (1f - i * 0.15f)), radius = 2.5f, center = Offset(cx, cy))
+                }
+            }
+        }
+
+        // Center glass disc
+        Box(
+            modifier = Modifier
+                .size(discSize)
+                .shadow(
+                    elevation = if (isConnected) 20.dp else if (isError) 14.dp else 4.dp,
+                    shape = CircleShape,
+                    ambientColor = coreColor.copy(alpha = 0.5f),
+                    spotColor = coreColor.copy(alpha = 0.5f)
+                )
+                .clip(CircleShape)
+                .background(
+                    Brush.radialGradient(
+                        colors = if (isConnected)
+                            listOf(theme.connected.copy(alpha = 0.18f), theme.accent.copy(alpha = 0.12f), Color.Black.copy(alpha = 0.45f))
+                        else
+                            listOf(theme.accent.copy(alpha = 0.13f), Color.Black.copy(alpha = 0.45f))
+                    )
+                )
+                .border(
+                    width = 1.dp,
+                    color = if (isConnected) theme.connected.copy(alpha = 0.5f) else theme.surfaceBorder,
+                    shape = CircleShape
+                ),
+            contentAlignment = Alignment.Center
+        ) {
+            TGMonogram(sizeDp = discSize * 0.58f)
+        }
+
+        // Spinning arc (connecting) / full ring (connected)
+        if (isConnecting || isConnected) {
+            val arcSize = discSize * 1.15f
+            Canvas(
+                modifier = Modifier
+                    .size(arcSize)
+                    .then(if (isConnecting) Modifier.graphicsLayer { rotationZ = spinAngle } else Modifier)
+            ) {
+                drawArc(
+                    color = coreColor.copy(alpha = if (isConnected) 0.85f else 0.9f),
+                    startAngle = 0f,
+                    sweepAngle = if (isConnected) 360f else 180f,
+                    useCenter = false,
+                    style = Stroke(
+                        width = if (isConnected) 2.dp.toPx() else 2.5.dp.toPx(),
+                        cap = StrokeCap.Round
+                    )
+                )
+            }
+        }
     }
 }
 
 // ===== Connect Button =====
 
 @Composable
-fun ConnectButton(
-    isConnected: Boolean,
-    isConnecting: Boolean,
-    isBusy: Boolean,
-    enabled: Boolean = true,
-    onClick: () -> Unit
-) {
+fun ConnectButton(status: ConnectionState, enabled: Boolean, onClick: () -> Unit) {
+    val theme = LocalTgTheme.current
+    val isConnected = status == ConnectionState.CONNECTED
+    val isConnecting = status == ConnectionState.CONNECTING
+    val isBusy = isConnecting || status == ConnectionState.DISCONNECTING
+
     val buttonColor by animateColorAsState(
         targetValue = when {
-            isConnected -> AccentRed
-            isConnecting -> AccentOrange
-            else -> AccentBlue
+            isConnected -> theme.error
+            isBusy -> theme.connecting
+            else -> theme.accent
         },
-        animationSpec = tween(400),
-        label = "buttonColor"
+        animationSpec = tween(400), label = "btn"
     )
 
     Button(
@@ -772,12 +906,7 @@ fun ConnectButton(
         modifier = Modifier
             .fillMaxWidth()
             .height(60.dp)
-            .shadow(
-                elevation = 12.dp,
-                shape = RoundedCornerShape(16.dp),
-                ambientColor = buttonColor.copy(alpha = 0.3f),
-                spotColor = buttonColor.copy(alpha = 0.3f)
-            ),
+            .shadow(12.dp, RoundedCornerShape(16.dp), ambientColor = buttonColor.copy(alpha = 0.3f), spotColor = buttonColor.copy(alpha = 0.3f)),
         shape = RoundedCornerShape(16.dp),
         colors = ButtonDefaults.buttonColors(
             containerColor = buttonColor,
@@ -785,21 +914,18 @@ fun ConnectButton(
         )
     ) {
         if (isBusy) {
-            CircularProgressIndicator(
-                modifier = Modifier.size(24.dp),
-                color = Color.White,
-                strokeWidth = 2.5.dp
-            )
-            Spacer(modifier = Modifier.width(12.dp))
+            CircularProgressIndicator(modifier = Modifier.size(22.dp), color = Color.White, strokeWidth = 2.5.dp)
+            Spacer(Modifier.width(12.dp))
         }
         Text(
             text = when {
-                isConnecting -> "Connecting..."
+                isConnecting -> "Connecting…"
                 isConnected -> "Disconnect"
                 else -> "Connect"
             },
             fontSize = 18.sp,
-            fontWeight = FontWeight.SemiBold
+            fontWeight = FontWeight.SemiBold,
+            color = Color.White
         )
     }
 }
@@ -808,12 +934,13 @@ fun ConnectButton(
 
 @Composable
 fun SectionLabel(text: String) {
+    val theme = LocalTgTheme.current
     Text(
         text = text.uppercase(),
-        color = TextSecondary,
-        fontSize = 12.sp,
+        color = theme.textTertiary,
+        fontSize = 11.sp,
         fontWeight = FontWeight.SemiBold,
-        letterSpacing = 1.sp,
-        modifier = Modifier.padding(top = 8.dp, bottom = 4.dp)
+        letterSpacing = 1.5.sp,
+        modifier = Modifier.padding(top = 8.dp, bottom = 10.dp)
     )
 }

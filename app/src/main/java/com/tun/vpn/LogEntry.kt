@@ -32,7 +32,8 @@ data class LogEntry(
     val timestamp: Long = System.currentTimeMillis(),
     val level: LogLevel = LogLevel.INFO,
     val source: LogSource = LogSource.APP,
-    val message: String = ""
+    val message: String = "",
+    val isFriendly: Boolean = false
 ) {
     fun formatted(): String {
         val time = TIME_FORMAT.format(Date(timestamp))

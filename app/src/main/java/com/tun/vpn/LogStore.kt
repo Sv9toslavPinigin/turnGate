@@ -53,6 +53,16 @@ object LogStore {
         addEntry(message, level, LogSource.WIREGUARD)
     }
 
+    fun addFriendlyLog(message: String, level: LogLevel = LogLevel.INFO) {
+        val entry = LogEntry(level = level, source = LogSource.APP, message = message, isFriendly = true)
+        val current = _entries.value
+        _entries.value = if (current.size >= MAX_IN_MEMORY) {
+            current.drop(current.size - MAX_IN_MEMORY + 1) + entry
+        } else {
+            current + entry
+        }
+    }
+
     fun clear() {
         _entries.value = emptyList()
         logFile?.let { if (it.exists()) it.writeText("") }

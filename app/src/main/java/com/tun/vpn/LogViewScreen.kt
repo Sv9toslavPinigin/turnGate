@@ -6,7 +6,9 @@ import android.content.Context
 import android.content.Intent
 import android.widget.Toast
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -49,6 +51,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
@@ -57,19 +60,12 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 
-private val AccentBlue = Color(0xFF3B82F6)
-private val TextSecondary = Color(0xFF94A3B8)
-private val CardDark = Color(0xFF1E293B)
-
-/**
- * Экран просмотра логов с поиском, фильтрацией и экспортом.
- */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun LogViewScreen(
-    onBack: () -> Unit
-) {
+fun LogViewScreen(onBack: () -> Unit) {
+    val theme = LocalTgTheme.current
     val allEntries by LogStore.entries.collectAsStateWithLifecycle()
+    var mode by remember { mutableStateOf("friendly") } // "friendly" | "raw"
     var searchQuery by remember { mutableStateOf("") }
     var selectedLevel by remember { mutableStateOf<LogLevel?>(null) }
     var selectedSource by remember { mutableStateOf<LogSource?>(null) }
@@ -77,151 +73,196 @@ fun LogViewScreen(
     val listState = rememberLazyListState()
     val context = LocalContext.current
 
-    val filteredEntries = remember(allEntries, searchQuery, selectedLevel, selectedSource) {
+    val displayEntries = remember(allEntries, mode, searchQuery, selectedLevel, selectedSource) {
         allEntries.filter { entry ->
-            (searchQuery.isBlank() || entry.message.contains(searchQuery, ignoreCase = true)) &&
-            (selectedLevel == null || entry.level == selectedLevel) &&
-            (selectedSource == null || entry.source == selectedSource)
+            val modeOk = if (mode == "friendly") entry.isFriendly else !entry.isFriendly
+            val searchOk = searchQuery.isBlank() || entry.message.contains(searchQuery, ignoreCase = true)
+            val levelOk = selectedLevel == null || entry.level == selectedLevel
+            val srcOk = selectedSource == null || entry.source == selectedSource
+            modeOk && searchOk && levelOk && srcOk
         }
     }
 
-    // Автоскролл
-    LaunchedEffect(filteredEntries.size, autoScroll) {
-        if (autoScroll && filteredEntries.isNotEmpty()) {
-            listState.animateScrollToItem(filteredEntries.size - 1)
+    LaunchedEffect(displayEntries.size, autoScroll) {
+        if (autoScroll && displayEntries.isNotEmpty()) {
+            listState.animateScrollToItem(displayEntries.size - 1)
         }
     }
+
+    val totalForMode = if (mode == "friendly")
+        allEntries.count { it.isFriendly }
+    else
+        allEntries.count { !it.isFriendly }
 
     Column(
         modifier = Modifier
             .fillMaxSize()
             .statusBarsPadding()
     ) {
-        // Top bar
         TopAppBar(
-            title = {
-                Text("Logs (${filteredEntries.size}/${allEntries.size})")
-            },
+            title = { Text("Activity ${displayEntries.size}/$totalForMode", color = theme.textPrimary) },
             navigationIcon = {
                 IconButton(onClick = onBack) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = AccentBlue)
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = theme.accent)
                 }
             },
             actions = {
-                // Auto-scroll toggle
                 IconButton(onClick = { autoScroll = !autoScroll }) {
                     Icon(
                         Icons.Filled.VerticalAlignBottom,
                         "Auto-scroll",
-                        tint = if (autoScroll) AccentBlue else TextSecondary
+                        tint = if (autoScroll) theme.accent else theme.textSecondary
                     )
                 }
-                // Copy all
                 IconButton(onClick = {
-                    val text = filteredEntries.joinToString("\n") { it.formatted() }
+                    val text = displayEntries.joinToString("\n") { it.formatted() }
                     val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                     clipboard.setPrimaryClip(ClipData.newPlainText("logs", text))
-                    Toast.makeText(context, "Copied ${filteredEntries.size} lines", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(context, "Copied ${displayEntries.size} lines", Toast.LENGTH_SHORT).show()
                 }) {
-                    Icon(Icons.Filled.ContentCopy, "Copy", tint = TextSecondary)
+                    Icon(Icons.Filled.ContentCopy, "Copy", tint = theme.textSecondary)
                 }
-                // Share
                 IconButton(onClick = {
-                    val text = filteredEntries.joinToString("\n") { it.formatted() }
+                    val text = displayEntries.joinToString("\n") { it.formatted() }
                     val intent = Intent(Intent.ACTION_SEND).apply {
                         type = "text/plain"
                         putExtra(Intent.EXTRA_TEXT, text)
                     }
                     context.startActivity(Intent.createChooser(intent, "Share Logs"))
                 }) {
-                    Icon(Icons.Filled.Share, "Share", tint = TextSecondary)
+                    Icon(Icons.Filled.Share, "Share", tint = theme.textSecondary)
                 }
-                // Clear
                 IconButton(onClick = { LogStore.clear() }) {
-                    Icon(Icons.Filled.Clear, "Clear", tint = Color(0xFFEF4444))
+                    Icon(Icons.Filled.Clear, "Clear", tint = theme.error)
                 }
             },
             colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent)
         )
 
+        // Friendly / Raw mode toggle
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp)
+                .clip(RoundedCornerShape(12.dp))
+                .background(theme.surface)
+        ) {
+            listOf("friendly" to "Friendly", "raw" to "Raw").forEach { (key, label) ->
+                val active = mode == key
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(if (active) theme.accent.copy(alpha = 0.18f) else Color.Transparent)
+                        .clickable(
+                            indication = null,
+                            interactionSource = remember { MutableInteractionSource() }
+                        ) { mode = key }
+                        .padding(vertical = 11.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = label,
+                        color = if (active) theme.accent else theme.textSecondary,
+                        fontSize = 13.sp,
+                        fontWeight = if (active) FontWeight.SemiBold else FontWeight.Normal
+                    )
+                }
+            }
+        }
+
+        Spacer(Modifier.height(8.dp))
+
         // Search bar
         OutlinedTextField(
             value = searchQuery,
             onValueChange = { searchQuery = it },
-            placeholder = { Text("Search logs...", color = TextSecondary.copy(alpha = 0.5f)) },
+            placeholder = { Text("Search…", color = theme.textSecondary.copy(alpha = 0.5f)) },
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 16.dp),
             singleLine = true,
             shape = RoundedCornerShape(12.dp),
             colors = OutlinedTextFieldDefaults.colors(
-                focusedBorderColor = AccentBlue,
-                unfocusedBorderColor = TextSecondary.copy(alpha = 0.3f),
-                focusedContainerColor = CardDark,
-                unfocusedContainerColor = CardDark
+                focusedBorderColor = theme.accent,
+                unfocusedBorderColor = theme.surfaceBorder,
+                focusedContainerColor = theme.surface,
+                unfocusedContainerColor = theme.surface,
+                focusedTextColor = theme.textPrimary,
+                unfocusedTextColor = theme.textPrimary
             )
         )
 
-        Spacer(modifier = Modifier.height(8.dp))
+        Spacer(Modifier.height(8.dp))
 
-        // Filter chips — источники
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp)
-                .horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(6.dp)
-        ) {
-            FilterChip(
-                selected = selectedSource == null,
-                onClick = { selectedSource = null },
-                label = { Text("All", fontSize = 12.sp) },
-                colors = chipColors(selectedSource == null)
-            )
-            LogSource.entries.forEach { source ->
-                FilterChip(
-                    selected = selectedSource == source,
-                    onClick = { selectedSource = if (selectedSource == source) null else source },
-                    label = { Text(source.displayName, fontSize = 12.sp) },
-                    colors = chipColors(selectedSource == source)
+        // Filter chips — only show in raw mode
+        if (mode == "raw") {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp)
+                    .horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                TgFilterChip(
+                    selected = selectedSource == null,
+                    onClick = { selectedSource = null },
+                    label = "All",
+                    theme = theme
                 )
+                LogSource.entries.forEach { source ->
+                    TgFilterChip(
+                        selected = selectedSource == source,
+                        onClick = { selectedSource = if (selectedSource == source) null else source },
+                        label = source.displayName,
+                        theme = theme
+                    )
+                }
+                Spacer(Modifier.width(12.dp))
+                LogLevel.entries.forEach { level ->
+                    TgFilterChip(
+                        selected = selectedLevel == level,
+                        onClick = { selectedLevel = if (selectedLevel == level) null else level },
+                        label = level.label,
+                        theme = theme
+                    )
+                }
             }
-
-            Spacer(modifier = Modifier.width(12.dp))
-
-            // Filter chips — уровни
-            LogLevel.entries.forEach { level ->
-                FilterChip(
-                    selected = selectedLevel == level,
-                    onClick = { selectedLevel = if (selectedLevel == level) null else level },
-                    label = { Text(level.label, fontSize = 12.sp) },
-                    colors = chipColors(selectedLevel == level)
-                )
-            }
+            Spacer(Modifier.height(8.dp))
         }
 
-        Spacer(modifier = Modifier.height(8.dp))
-
         // Log list
-        if (filteredEntries.isEmpty()) {
-            Box(
-                modifier = Modifier.fillMaxSize(),
-                contentAlignment = Alignment.Center
-            ) {
+        if (displayEntries.isEmpty()) {
+            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Text(
-                    text = if (allEntries.isEmpty()) "No logs yet" else "No matching logs",
-                    color = TextSecondary,
-                    fontSize = 14.sp
+                    text = if (allEntries.isEmpty()) "Nothing yet — connect to start streaming activity."
+                           else "No matching logs",
+                    color = theme.textSecondary,
+                    fontSize = 13.sp,
+                    modifier = Modifier.padding(horizontal = 32.dp)
                 )
             }
         } else {
-            LazyColumn(
-                state = listState,
-                modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
-            ) {
-                items(filteredEntries, key = { it.id }) { entry ->
-                    LogRow(entry)
+            if (mode == "friendly") {
+                LazyColumn(
+                    state = listState,
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    items(displayEntries, key = { it.id }) { entry ->
+                        FriendlyLogRow(entry, theme)
+                    }
+                }
+            } else {
+                LazyColumn(
+                    state = listState,
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
+                ) {
+                    items(displayEntries, key = { it.id }) { entry ->
+                        RawLogRow(entry, theme)
+                    }
                 }
             }
         }
@@ -229,21 +270,48 @@ fun LogViewScreen(
 }
 
 @Composable
-private fun LogRow(entry: LogEntry) {
-    val levelColor = when (entry.level) {
-        LogLevel.ERROR -> Color(0xFFEF4444)
-        LogLevel.WARNING -> Color(0xFFF59E0B)
-        LogLevel.INFO -> Color(0xFF3B82F6)
-        LogLevel.DEBUG -> Color(0xFF6B7280)
+private fun FriendlyLogRow(entry: LogEntry, theme: TgTheme) {
+    val dotColor = when (entry.level) {
+        LogLevel.ERROR -> theme.error
+        LogLevel.WARNING -> theme.connecting
+        LogLevel.INFO -> theme.accent
+        LogLevel.DEBUG -> theme.textTertiary
     }
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        Box(
+            modifier = Modifier
+                .size(8.dp)
+                .clip(RoundedCornerShape(4.dp))
+                .background(dotColor)
+        )
+        Text(
+            text = entry.message,
+            color = theme.textPrimary,
+            fontSize = 14.sp,
+            lineHeight = 20.sp,
+            modifier = Modifier.weight(1f)
+        )
+    }
+}
 
+@Composable
+private fun RawLogRow(entry: LogEntry, theme: TgTheme) {
+    val levelColor = when (entry.level) {
+        LogLevel.ERROR -> theme.error
+        LogLevel.WARNING -> theme.connecting
+        LogLevel.INFO -> theme.accent
+        LogLevel.DEBUG -> theme.textTertiary
+    }
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .padding(vertical = 1.dp),
         verticalAlignment = Alignment.Top
     ) {
-        // Level indicator
         Text(
             text = entry.level.label,
             color = levelColor,
@@ -252,20 +320,16 @@ private fun LogRow(entry: LogEntry) {
             fontFamily = FontFamily.Monospace,
             modifier = Modifier.width(28.dp)
         )
-
-        // Source tag
         Text(
             text = entry.source.tag,
-            color = TextSecondary,
+            color = theme.textSecondary,
             fontSize = 9.sp,
             fontFamily = FontFamily.Monospace,
             modifier = Modifier.width(22.dp)
         )
-
-        // Message
         Text(
             text = entry.message,
-            color = Color(0xFFCBD5E1),
+            color = theme.logText,
             fontSize = 10.sp,
             fontFamily = FontFamily.Monospace,
             lineHeight = 14.sp,
@@ -275,9 +339,22 @@ private fun LogRow(entry: LogEntry) {
 }
 
 @Composable
-private fun chipColors(selected: Boolean) = FilterChipDefaults.filterChipColors(
-    selectedContainerColor = AccentBlue.copy(alpha = 0.2f),
-    selectedLabelColor = AccentBlue,
-    containerColor = CardDark,
-    labelColor = TextSecondary
-)
+private fun TgFilterChip(selected: Boolean, onClick: () -> Unit, label: String, theme: TgTheme) {
+    FilterChip(
+        selected = selected,
+        onClick = onClick,
+        label = { Text(label, fontSize = 12.sp) },
+        colors = FilterChipDefaults.filterChipColors(
+            selectedContainerColor = theme.accent.copy(alpha = 0.2f),
+            selectedLabelColor = theme.accent,
+            containerColor = theme.surface,
+            labelColor = theme.textSecondary
+        ),
+        border = FilterChipDefaults.filterChipBorder(
+            enabled = true,
+            selected = selected,
+            selectedBorderColor = theme.accent.copy(alpha = 0.4f),
+            borderColor = theme.surfaceBorder
+        )
+    )
+}

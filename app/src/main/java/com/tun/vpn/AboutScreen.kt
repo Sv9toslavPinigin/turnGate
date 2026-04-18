@@ -2,6 +2,7 @@ package com.tun.vpn
 
 import android.content.Intent
 import android.net.Uri
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
@@ -14,7 +15,6 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -25,19 +25,20 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
-private val AccentBlue = Color(0xFF3B82F6)
-private val AccentCyan = Color(0xFF06B6D4)
-private val TextSecondary = Color(0xFF94A3B8)
-
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AboutScreen(onBack: () -> Unit) {
+    val theme = LocalTgTheme.current
     val context = LocalContext.current
 
     Column(
@@ -46,10 +47,10 @@ fun AboutScreen(onBack: () -> Unit) {
             .statusBarsPadding()
     ) {
         TopAppBar(
-            title = { Text("About") },
+            title = { Text("About", color = theme.textPrimary) },
             navigationIcon = {
                 IconButton(onClick = onBack) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = AccentBlue)
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = theme.accent)
                 }
             },
             colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent)
@@ -62,26 +63,62 @@ fun AboutScreen(onBack: () -> Unit) {
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center
         ) {
-            Icon(
-                Icons.Filled.Shield,
-                contentDescription = null,
-                tint = AccentBlue,
-                modifier = Modifier.size(80.dp)
-            )
+            // TG monogram instead of shield
+            Canvas(modifier = Modifier.size(80.dp)) {
+                val s = size.width
+                val strokeW = s * 0.104f
+                val cx = s / 2f
+                val cy = s / 2f
+                val gRadius = s * 0.333f
+                // G arc
+                drawArc(
+                    color = theme.accent,
+                    startAngle = 0f,
+                    sweepAngle = 306f,
+                    useCenter = false,
+                    topLeft = Offset(cx - gRadius, cy - gRadius),
+                    size = Size(gRadius * 2, gRadius * 2),
+                    style = Stroke(width = strokeW, cap = StrokeCap.Round)
+                )
+                // G bar
+                drawLine(
+                    color = theme.accent,
+                    start = Offset(cx + gRadius, cy),
+                    end = Offset(cx + gRadius * 0.375f, cy),
+                    strokeWidth = strokeW,
+                    cap = StrokeCap.Round
+                )
+                // T crossbar
+                drawLine(
+                    color = theme.textPrimary.copy(alpha = 0.92f),
+                    start = Offset(s * 0.292f, s * 0.292f),
+                    end = Offset(s * 0.708f, s * 0.292f),
+                    strokeWidth = strokeW,
+                    cap = StrokeCap.Round
+                )
+                // T stem
+                drawLine(
+                    color = theme.textPrimary.copy(alpha = 0.92f),
+                    start = Offset(cx, s * 0.292f),
+                    end = Offset(cx, s * 0.708f),
+                    strokeWidth = strokeW,
+                    cap = StrokeCap.Round
+                )
+            }
 
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(20.dp))
 
             Text(
                 text = "TurnGate",
                 fontSize = 28.sp,
                 fontWeight = FontWeight.Bold,
-                color = Color(0xFFF1F5F9)
+                color = theme.textPrimary
             )
 
             Text(
                 text = "v${BuildConfig.VERSION_NAME}",
                 fontSize = 14.sp,
-                color = TextSecondary,
+                color = theme.textSecondary,
                 modifier = Modifier.padding(top = 4.dp)
             )
 
@@ -90,7 +127,14 @@ fun AboutScreen(onBack: () -> Unit) {
             Text(
                 text = "VPN client using VK TURN proxy",
                 fontSize = 14.sp,
-                color = TextSecondary
+                color = theme.textSecondary
+            )
+
+            Text(
+                text = "Open source · no telemetry",
+                fontSize = 12.sp,
+                color = theme.textTertiary,
+                modifier = Modifier.padding(top = 4.dp)
             )
 
             Spacer(modifier = Modifier.height(32.dp))
@@ -102,7 +146,7 @@ fun AboutScreen(onBack: () -> Unit) {
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(12.dp)
             ) {
-                Text("GitHub: vk-turn-proxy")
+                Text("GitHub: vk-turn-proxy", color = theme.textPrimary)
             }
 
             Spacer(modifier = Modifier.height(8.dp))
@@ -114,7 +158,7 @@ fun AboutScreen(onBack: () -> Unit) {
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(12.dp)
             ) {
-                Text("GitHub: TurnBridge (iOS)")
+                Text("GitHub: TurnBridge", color = theme.textPrimary)
             }
         }
     }

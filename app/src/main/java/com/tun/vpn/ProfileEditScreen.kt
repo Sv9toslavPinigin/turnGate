@@ -46,10 +46,6 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
-private val AccentBlue = Color(0xFF3B82F6)
-private val AccentRed = Color(0xFFEF4444)
-private val TextSecondary = Color(0xFF94A3B8)
-private val CardDark = Color(0xFF1E293B)
 
 /**
  * Экран редактирования профиля.
@@ -63,6 +59,7 @@ fun ProfileEditScreen(
     onDelete: (String) -> Unit,
     onBack: () -> Unit
 ) {
+    val theme = LocalTgTheme.current
     var name by remember { mutableStateOf(profile.name) }
     var vkLink by remember { mutableStateOf(profile.vkLink) }
     var peerAddr by remember { mutableStateOf(profile.peerAddr) }
@@ -98,7 +95,7 @@ fun ProfileEditScreen(
             title = { Text("Edit Profile") },
             navigationIcon = {
                 IconButton(onClick = onBack) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = AccentBlue)
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = theme.accent)
                 }
             },
             colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent)
@@ -167,8 +164,8 @@ fun ProfileEditScreen(
                     checked = manualCaptcha,
                     onCheckedChange = { manualCaptcha = it },
                     colors = SwitchDefaults.colors(
-                        checkedThumbColor = AccentBlue,
-                        checkedTrackColor = AccentBlue.copy(alpha = 0.3f)
+                        checkedThumbColor = theme.accent,
+                        checkedTrackColor = theme.accent.copy(alpha = 0.3f)
                     )
                 )
             }
@@ -182,7 +179,7 @@ fun ProfileEditScreen(
                 placeholder = {
                     Text(
                         "[Interface]\nPrivateKey = ...\nAddress = 10.0.0.2/32\n\n[Peer]\nPublicKey = ...\nEndpoint = 127.0.0.1:9000\nAllowedIPs = 0.0.0.0/0",
-                        color = TextSecondary.copy(alpha = 0.3f),
+                        color = theme.textSecondary.copy(alpha = 0.3f),
                         fontFamily = FontFamily.Monospace,
                         fontSize = 11.sp
                     )
@@ -197,10 +194,10 @@ fun ProfileEditScreen(
                 ),
                 shape = RoundedCornerShape(12.dp),
                 colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = AccentBlue,
-                    unfocusedBorderColor = TextSecondary.copy(alpha = 0.3f),
-                    focusedContainerColor = CardDark,
-                    unfocusedContainerColor = CardDark
+                    focusedBorderColor = theme.accent,
+                    unfocusedBorderColor = theme.textSecondary.copy(alpha = 0.3f),
+                    focusedContainerColor = theme.surface,
+                    unfocusedContainerColor = theme.surface
                 )
             )
 
@@ -211,15 +208,15 @@ fun ProfileEditScreen(
                 onClick = { showDeleteDialog = true },
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(12.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = AccentRed.copy(alpha = 0.15f))
+                colors = ButtonDefaults.buttonColors(containerColor = theme.error.copy(alpha = 0.15f))
             ) {
                 Icon(
                     Icons.Filled.Delete,
                     contentDescription = null,
-                    tint = AccentRed,
+                    tint = theme.error,
                     modifier = Modifier.padding(end = 8.dp)
                 )
-                Text("Delete Profile", color = AccentRed)
+                Text("Delete Profile", color = theme.error)
             }
 
             Spacer(modifier = Modifier.height(32.dp))
@@ -238,7 +235,7 @@ fun ProfileEditScreen(
                     onDelete(profile.id)
                     onBack()
                 }) {
-                    Text("Delete", color = AccentRed)
+                    Text("Delete", color = theme.error)
                 }
             },
             dismissButton = {
@@ -258,22 +255,23 @@ private fun ProfileField(
     placeholder: String = "",
     keyboardType: KeyboardType = KeyboardType.Text
 ) {
+    val theme = LocalTgTheme.current
     OutlinedTextField(
         value = value,
         onValueChange = onValueChange,
         label = { Text(label) },
         placeholder = if (placeholder.isNotEmpty()) {
-            { Text(placeholder, color = TextSecondary.copy(alpha = 0.5f)) }
+            { Text(placeholder, color = theme.textSecondary.copy(alpha = 0.5f)) }
         } else null,
         modifier = Modifier.fillMaxWidth(),
         singleLine = true,
         shape = RoundedCornerShape(12.dp),
         keyboardOptions = KeyboardOptions(keyboardType = keyboardType),
         colors = OutlinedTextFieldDefaults.colors(
-            focusedBorderColor = AccentBlue,
-            unfocusedBorderColor = TextSecondary.copy(alpha = 0.3f),
-            focusedContainerColor = CardDark,
-            unfocusedContainerColor = CardDark
+            focusedBorderColor = theme.accent,
+            unfocusedBorderColor = theme.textSecondary.copy(alpha = 0.3f),
+            focusedContainerColor = theme.surface,
+            unfocusedContainerColor = theme.surface
         )
     )
 }
