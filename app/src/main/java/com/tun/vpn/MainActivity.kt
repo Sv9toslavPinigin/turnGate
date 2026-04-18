@@ -49,6 +49,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlin.math.cos
 import kotlin.math.sin
 
@@ -144,6 +147,24 @@ enum class Screen { HOME, SETTINGS, LOGS, ABOUT, PROFILE_EDIT }
 
 @Composable
 fun TurnGateTheme(tg: TgTheme, content: @Composable () -> Unit) {
+    val base = MaterialTheme.typography
+    val typography = androidx.compose.material3.Typography(
+        displayLarge = base.displayLarge.copy(fontFamily = FontDisplay),
+        displayMedium = base.displayMedium.copy(fontFamily = FontDisplay),
+        displaySmall = base.displaySmall.copy(fontFamily = FontDisplay),
+        headlineLarge = base.headlineLarge.copy(fontFamily = FontDisplay),
+        headlineMedium = base.headlineMedium.copy(fontFamily = FontDisplay),
+        headlineSmall = base.headlineSmall.copy(fontFamily = FontDisplay),
+        titleLarge = base.titleLarge.copy(fontFamily = FontDisplay),
+        titleMedium = base.titleMedium.copy(fontFamily = FontDisplay),
+        titleSmall = base.titleSmall.copy(fontFamily = FontDisplay),
+        bodyLarge = base.bodyLarge.copy(fontFamily = FontBody),
+        bodyMedium = base.bodyMedium.copy(fontFamily = FontBody),
+        bodySmall = base.bodySmall.copy(fontFamily = FontBody),
+        labelLarge = base.labelLarge.copy(fontFamily = FontDisplay),
+        labelMedium = base.labelMedium.copy(fontFamily = FontDisplay),
+        labelSmall = base.labelSmall.copy(fontFamily = FontDisplay),
+    )
     MaterialTheme(
         colorScheme = darkColorScheme(
             primary = tg.accent,
@@ -156,6 +177,7 @@ fun TurnGateTheme(tg: TgTheme, content: @Composable () -> Unit) {
             onSurfaceVariant = tg.textSecondary,
             error = tg.error
         ),
+        typography = typography,
         content = content
     )
 }
@@ -227,8 +249,10 @@ fun MainApp(
 
         if (showCaptcha) {
             val captchaIdx by vm.captchaCount.collectAsStateWithLifecycle()
+            val activeN = state.profiles.find { it.id == state.selectedProfileId }?.nValue ?: 1
             CaptchaWebViewDialog(
                 captchaIndex = captchaIdx,
+                totalEstimate = activeN,
                 onDismiss = { vm.dismissCaptcha() },
                 onCancel = { vm.disconnect() }
             )
@@ -274,15 +298,27 @@ fun HomeScreen(
             IconButton(onClick = { showImportModal = true }, enabled = !isConnected && !isBusy) {
                 Icon(Icons.Filled.Add, "Import", tint = if (!isConnected && !isBusy) theme.accent else theme.textTertiary)
             }
-            // TurnGate title
-            Text(
-                text = "TurnGate",
-                fontSize = 38.sp,
-                fontWeight = FontWeight.Black,
-                style = MaterialTheme.typography.headlineLarge.copy(
-                    brush = Brush.linearGradient(colors = listOf(theme.accent, theme.accent2))
+            // TurnGate title with tagline
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(
+                    text = "TurnGate",
+                    fontSize = 32.sp,
+                    fontWeight = FontWeight.Black,
+                    fontFamily = FontDisplay,
+                    style = MaterialTheme.typography.headlineLarge.copy(
+                        brush = Brush.linearGradient(colors = listOf(theme.accent, theme.accent2))
+                    )
                 )
-            )
+                Text(
+                    text = LocalStrings.current.tagline,
+                    color = theme.textSecondary,
+                    fontSize = 10.sp,
+                    fontFamily = FontBody,
+                    fontWeight = FontWeight.Medium,
+                    letterSpacing = 0.5.sp,
+                    modifier = Modifier.padding(top = 2.dp)
+                )
+            }
             IconButton(onClick = onSettingsClick) {
                 Icon(Icons.Filled.Settings, "Settings", tint = theme.textSecondary)
             }
@@ -369,6 +405,16 @@ fun HomeScreen(
         }
 
         Spacer(Modifier.weight(1f))
+
+        // Manual captcha toggle — привязан к выбранному профилю.
+        val activeProfile = state.profiles.find { it.id == state.selectedProfileId }
+        if (activeProfile != null && !isConnected && !isBusy) {
+            ManualCaptchaToggle(
+                checked = activeProfile.manualCaptcha,
+                onChange = { vm.updateProfile(activeProfile.copy(manualCaptcha = it)) }
+            )
+            Spacer(Modifier.height(12.dp))
+        }
 
         // Connect button
         ConnectButton(
@@ -572,18 +618,94 @@ fun GlobalSettingsScreen(
                 onClick = onAboutClick
             )
 
-            if (update != null) {
-                Spacer(Modifier.height(24.dp))
-                SectionLabel(t.updateAvailable)
-                Button(
-                    onClick = { vm.downloadUpdate() },
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(12.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = theme.connected)
-                ) { Text("v${update!!.versionName}", color = Color.Black) }
-            }
+            Spacer(Modifier.height(24.dp))
+            SectionLabel(t.updatesSection)
+            UpdateBlock(vm = vm)
 
             Spacer(Modifier.height(32.dp))
+        }
+    }
+}
+
+@Composable
+private fun UpdateBlock(vm: MainViewModel) {
+    val theme = LocalTgTheme.current
+    val t = LocalStrings.current
+    val update by vm.updateInfo.collectAsStateWithLifecycle()
+    val ctx = LocalContext.current
+    var checking by remember { mutableStateOf(false) }
+    var lastCheckOk by remember { mutableStateOf(false) }
+
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        // Manual check row
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(14.dp))
+                .background(theme.surface)
+                .border(1.dp, theme.surfaceBorder, RoundedCornerShape(14.dp))
+                .clickable(indication = null, interactionSource = remember { MutableInteractionSource() }) {
+                    if (!checking) {
+                        checking = true
+                        lastCheckOk = false
+                        vm.viewModelScope.launch(Dispatchers.IO) {
+                            val result = UpdateChecker.check()
+                            vm.setUpdateInfo(result)
+                            checking = false
+                            lastCheckOk = result == null
+                            if (result == null) {
+                                android.widget.Toast.makeText(ctx, t.upToDate, android.widget.Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                    }
+                }
+                .padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(14.dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(36.dp)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(theme.accent.copy(alpha = 0.12f)),
+                contentAlignment = Alignment.Center
+            ) {
+                if (checking) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(18.dp),
+                        strokeWidth = 2.dp,
+                        color = theme.accent
+                    )
+                } else {
+                    Text("↻", color = theme.accent, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+            Column(Modifier.weight(1f)) {
+                Text(t.checkForUpdates, color = theme.textPrimary, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                Text(
+                    text = "v${BuildConfig.VERSION_NAME} · " + t.checkForUpdatesSub,
+                    color = theme.textSecondary,
+                    fontSize = 11.sp,
+                    fontFamily = FontMono
+                )
+            }
+        }
+
+        // Install prompt if available
+        update?.let { info ->
+            Button(
+                onClick = { vm.downloadUpdate() },
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(12.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = theme.connected)
+            ) {
+                Text(
+                    "${t.downloadUpdate} v${info.versionName}",
+                    color = Color.Black,
+                    fontFamily = FontDisplay,
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
         }
     }
 }
@@ -997,6 +1119,51 @@ fun ConnectButton(status: ConnectionState, enabled: Boolean, onClick: () -> Unit
             fontSize = 18.sp,
             fontWeight = FontWeight.SemiBold,
             color = Color.White
+        )
+    }
+}
+
+// ===== Manual Captcha Toggle (above Connect) =====
+
+@Composable
+fun ManualCaptchaToggle(checked: Boolean, onChange: (Boolean) -> Unit) {
+    val theme = LocalTgTheme.current
+    val t = LocalStrings.current
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
+            .background(if (checked) theme.accent.copy(alpha = 0.12f) else theme.surface)
+            .border(
+                1.dp,
+                if (checked) theme.accent.copy(alpha = 0.5f) else theme.surfaceBorder,
+                RoundedCornerShape(14.dp)
+            )
+            .clickable(
+                indication = null,
+                interactionSource = remember { MutableInteractionSource() }
+            ) { onChange(!checked) }
+            .padding(horizontal = 16.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            text = t.manualCaptchaToggle,
+            color = if (checked) theme.accent else theme.textPrimary,
+            fontSize = 13.sp,
+            fontWeight = FontWeight.Medium,
+            fontFamily = FontBody,
+            modifier = Modifier.weight(1f)
+        )
+        Switch(
+            checked = checked,
+            onCheckedChange = onChange,
+            colors = SwitchDefaults.colors(
+                checkedThumbColor = theme.accent,
+                checkedTrackColor = theme.accent.copy(alpha = 0.35f),
+                uncheckedThumbColor = theme.textSecondary,
+                uncheckedTrackColor = theme.surface,
+                uncheckedBorderColor = theme.surfaceBorder
+            )
         )
     }
 }

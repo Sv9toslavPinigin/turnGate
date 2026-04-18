@@ -83,6 +83,7 @@ data class TgStrings(
     val conns: String,
     val manualCaptcha: String,
     val manualCaptchaSub: String,
+    val manualCaptchaToggle: String,
     val deleteProfile: String,
     val deleteConfirmTitle: String, // %s
     val deleteConfirmBody: String,
@@ -109,6 +110,11 @@ data class TgStrings(
     // updates
     val updateAvailable: String,
     val updateTapToInstall: String,
+    val updatesSection: String,
+    val checkForUpdates: String,
+    val checkForUpdatesSub: String,
+    val upToDate: String,
+    val downloadUpdate: String,
 
     // about
     val verPrefix: String,
@@ -199,6 +205,7 @@ private val EN = TgStrings(
     conns = "Parallel connections",
     manualCaptcha = "Always solve captcha manually",
     manualCaptchaSub = "Skip the automatic solver",
+    manualCaptchaToggle = "Solve captcha manually",
     deleteProfile = "Delete profile",
     deleteConfirmTitle = "Delete \"%s\"?",
     deleteConfirmBody = "This cannot be undone.",
@@ -222,6 +229,11 @@ private val EN = TgStrings(
 
     updateAvailable = "Update available",
     updateTapToInstall = "tap to install",
+    updatesSection = "Updates",
+    checkForUpdates = "Check for updates",
+    checkForUpdatesSub = "Tap to query GitHub releases",
+    upToDate = "You're on the latest version",
+    downloadUpdate = "Download",
 
     verPrefix = "Version",
     aboutDesc = "TurnGate routes WireGuard traffic through VK's TURN servers. Open source, no telemetry.",
@@ -310,6 +322,7 @@ private val RU = TgStrings(
     conns = "Параллельные соединения",
     manualCaptcha = "Всегда решать капчу вручную",
     manualCaptchaSub = "Пропустить автоматический решатель",
+    manualCaptchaToggle = "Решать капчу вручную",
     deleteProfile = "Удалить профиль",
     deleteConfirmTitle = "Удалить \"%s\"?",
     deleteConfirmBody = "Это действие необратимо.",
@@ -333,6 +346,11 @@ private val RU = TgStrings(
 
     updateAvailable = "Доступно обновление",
     updateTapToInstall = "нажмите для установки",
+    updatesSection = "Обновления",
+    checkForUpdates = "Проверить обновления",
+    checkForUpdatesSub = "Нажмите, чтобы запросить GitHub releases",
+    upToDate = "У вас последняя версия",
+    downloadUpdate = "Скачать",
 
     verPrefix = "Версия",
     aboutDesc = "TurnGate направляет трафик WireGuard через TURN-серверы VK. Открытый код, без телеметрии.",

@@ -192,6 +192,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun setUpdateInfo(info: UpdateInfo?) {
+        _updateInfo.value = info
+    }
+
     fun downloadUpdate() {
         _updateInfo.value?.let {
             UpdateChecker.downloadAndInstall(getApplication(), it)

@@ -7,6 +7,7 @@ import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -17,6 +18,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
@@ -55,6 +57,7 @@ import kotlinx.coroutines.delay
 @Composable
 fun CaptchaWebViewDialog(
     captchaIndex: Int,
+    totalEstimate: Int,
     onDismiss: () -> Unit,
     onCancel: () -> Unit
 ) {
@@ -100,38 +103,34 @@ fun CaptchaWebViewDialog(
                 .background(theme.bg1)
                 .padding(14.dp)
         ) {
-            // Progress bar at top — indeterminate, shows "something is happening"
-            if (captchaIndex > 0) {
-                LinearProgressIndicator(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(3.dp)
-                        .clip(RoundedCornerShape(2.dp)),
-                    color = theme.accent,
-                    trackColor = theme.surfaceBorder,
-                    strokeCap = StrokeCap.Round
-                )
-                Spacer(Modifier.height(12.dp))
-            }
+            val t = LocalStrings.current
 
-            // Header
+            // Step dots header: Step N of ~M + current/total progress.
+            val total = totalEstimate.coerceAtLeast(1)
+            val shown = captchaIndex.coerceAtLeast(1)
+            CaptchaStepHeader(theme = theme, current = shown, total = total, label = t.captchaStepOf.format(shown, total))
+
+            Spacer(Modifier.height(10.dp))
+
+            // Title row with refresh/cancel
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.Top
             ) {
-                val t = LocalStrings.current
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = if (captchaIndex > 0) "#$captchaIndex · ${t.captchaTitle}" else t.captchaTitle,
+                        text = t.captchaTitle,
                         color = theme.textPrimary,
-                        fontSize = 17.sp,
-                        fontWeight = FontWeight.SemiBold
+                        fontSize = 19.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontDisplay
                     )
                     Text(
                         text = t.captchaHint,
                         color = theme.textSecondary,
                         fontSize = 11.sp,
+                        fontFamily = FontBody,
                         modifier = Modifier.padding(top = 3.dp)
                     )
                 }
@@ -208,6 +207,103 @@ fun CaptchaWebViewDialog(
 
     DisposableEffect(Unit) {
         onDispose { webViewRef?.destroy() }
+    }
+}
+
+/**
+ * Шапка с прогрессом «Шаг N из ~M» + точки-чекбоксы для каждого шага.
+ * Оценка total — из profile.nValue. Клэмпится до 12 точек чтобы не превращать
+ * в неконтейнер.
+ */
+@Composable
+private fun CaptchaStepHeader(theme: TgTheme, current: Int, total: Int, label: String) {
+    val capped = total.coerceAtMost(12)
+    val progress = (current.toFloat() / total.toFloat()).coerceIn(0f, 1f)
+
+    Column(modifier = Modifier.fillMaxWidth()) {
+        // Label row: small uppercase
+        Text(
+            text = label.uppercase(),
+            color = theme.textTertiary,
+            fontSize = 10.sp,
+            fontWeight = FontWeight.SemiBold,
+            fontFamily = FontDisplay,
+            letterSpacing = 1.4.sp
+        )
+        Spacer(Modifier.height(8.dp))
+
+        // Progress track
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(4.dp)
+                .clip(RoundedCornerShape(2.dp))
+                .background(theme.surface)
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth(progress)
+                    .fillMaxHeight()
+                    .clip(RoundedCornerShape(2.dp))
+                    .background(
+                        androidx.compose.ui.graphics.Brush.horizontalGradient(
+                            listOf(theme.accent, theme.accent2)
+                        )
+                    )
+            )
+        }
+
+        Spacer(Modifier.height(8.dp))
+
+        // Step dots
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            for (i in 1..capped) {
+                val done = i < current
+                val active = i == current
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        modifier = Modifier
+                            .size(14.dp)
+                            .clip(RoundedCornerShape(7.dp))
+                            .background(
+                                when {
+                                    done -> theme.accent
+                                    active -> theme.connecting
+                                    else -> Color.Transparent
+                                }
+                            )
+                            .border(
+                                width = 1.5.dp,
+                                color = when {
+                                    done -> theme.accent
+                                    active -> theme.connecting
+                                    else -> theme.textTertiary
+                                },
+                                shape = RoundedCornerShape(7.dp)
+                            ),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        if (done) {
+                            Text("✓", color = Color.Black, fontSize = 9.sp, fontWeight = FontWeight.Black)
+                        }
+                    }
+                    if (capped <= 8) {
+                        Spacer(Modifier.width(4.dp))
+                        Text(
+                            "#$i",
+                            color = if (active || done) theme.textSecondary else theme.textTertiary,
+                            fontSize = 10.sp,
+                            fontFamily = FontDisplay,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
+                }
+            }
+        }
     }
 }
 
