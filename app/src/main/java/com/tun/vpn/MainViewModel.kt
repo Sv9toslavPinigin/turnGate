@@ -63,15 +63,23 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 when (event) {
                     is CaptchaEvent.ManualCaptchaRequired -> {
                         _captchaCount.value = _captchaCount.value + 1
+                        // Диалог показываем всегда (капча требует действий), но статус-текст
+                        // не перетираем если уже CONNECTED — остальные identities решают
+                        // капчу в фоне и не должны визуально «ломать» подключение.
+                        val connected = _state.value.status == ConnectionState.CONNECTED
                         _showCaptchaDialog.value = true
-                        _state.value = _state.value.copy(
-                            statusText = "Waiting for captcha #${_captchaCount.value}…"
-                        )
+                        if (!connected) {
+                            _state.value = _state.value.copy(
+                                statusText = "Waiting for captcha #${_captchaCount.value}…"
+                            )
+                        }
                         LogStore.addFriendlyLog("VK asked for a check (#${_captchaCount.value})", LogLevel.WARNING)
                     }
                     is CaptchaEvent.CaptchaSolved -> {
                         _showCaptchaDialog.value = false
-                        _state.value = _state.value.copy(statusText = "Captcha solved, continuing…")
+                        if (_state.value.status != ConnectionState.CONNECTED) {
+                            _state.value = _state.value.copy(statusText = "Captcha solved, continuing…")
+                        }
                         LogStore.addFriendlyLog("Check passed — continuing")
                     }
                     is CaptchaEvent.CaptchaFailed -> {
