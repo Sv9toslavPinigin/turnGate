@@ -63,24 +63,24 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 when (event) {
                     is CaptchaEvent.ManualCaptchaRequired -> {
                         _captchaCount.value = _captchaCount.value + 1
-                        // Диалог показываем всегда (капча требует действий), но статус-текст
-                        // не перетираем если уже CONNECTED — остальные identities решают
-                        // капчу в фоне и не должны визуально «ломать» подключение.
                         val connected = _state.value.status == ConnectionState.CONNECTED
                         _showCaptchaDialog.value = true
                         if (!connected) {
                             _state.value = _state.value.copy(
-                                statusText = "Waiting for captcha #${_captchaCount.value}…"
+                                statusText = Strings.current.stCaptchaWaiting.format(_captchaCount.value)
                             )
                         }
-                        LogStore.addFriendlyLog("VK asked for a check (#${_captchaCount.value})", LogLevel.WARNING)
+                        LogStore.addFriendlyLog(
+                            Strings.current.fVkCaptcha.format(_captchaCount.value),
+                            LogLevel.WARNING
+                        )
                     }
                     is CaptchaEvent.CaptchaSolved -> {
                         _showCaptchaDialog.value = false
                         if (_state.value.status != ConnectionState.CONNECTED) {
-                            _state.value = _state.value.copy(statusText = "Captcha solved, continuing…")
+                            _state.value = _state.value.copy(statusText = Strings.current.stCaptchaSolved)
                         }
-                        LogStore.addFriendlyLog("Check passed — continuing")
+                        LogStore.addFriendlyLog(Strings.current.fCaptchaPassed)
                     }
                     is CaptchaEvent.CaptchaFailed -> {
                         _showCaptchaDialog.value = false
@@ -93,22 +93,23 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             proxyManager.stage.collect { stage ->
                 if (_state.value.status == ConnectionState.CONNECTED) return@collect
+                val s = Strings.current
                 val (text, friendly) = when (stage) {
                     is ProxyStage.Starting ->
-                        "Starting proxy…" to "Starting TurnGate"
+                        s.stStartingProxy to s.fStartingTurnGate
                     is ProxyStage.AuthConnecting ->
-                        "Authenticating with VK…" to "Reaching VK servers"
+                        s.stAuthenticating to s.fReachingVk
                     is ProxyStage.SolvingCaptcha ->
-                        "Solving captcha…" to "Solving captcha automatically"
+                        s.stCaptchaSolving to s.fSolvingCaptcha
                     is ProxyStage.CaptchaSolved ->
-                        "Captcha solved, connecting…" to "Captcha passed"
+                        s.stCaptchaSolved to s.fCaptchaPassedShort
                     is ProxyStage.IdentityRegistered ->
-                        "Registered identity ${stage.current}/${stage.total}…" to
-                            "Authenticating (${stage.current}/${stage.total})"
+                        s.stRegisteringIdentity.format(stage.current, stage.total) to
+                            s.fAuthenticating.format(stage.current, stage.total)
                     is ProxyStage.DtlsEstablished ->
-                        "DTLS established, allocating TURN…" to "Establishing secure channel"
+                        s.stDtls to s.fSecureChannel
                     is ProxyStage.TurnAllocated ->
-                        "TURN allocated, waiting for handshake…" to "Opening WireGuard tunnel"
+                        s.stTurnAllocated to s.fOpeningTunnel
                 }
                 _state.value = _state.value.copy(statusText = text)
                 LogStore.addFriendlyLog(friendly)
@@ -168,14 +169,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             profileStore.selectedProfileId = added.id
             refreshProfileState()
 
-            _state.value = _state.value.copy(statusText = "Imported: ${added.name}")
+            _state.value = _state.value.copy(statusText = Strings.current.stImported.format(added.name))
             Log.i(TAG, "Config imported as profile: ${added.name}")
             true
         } catch (e: Exception) {
             Log.e(TAG, "Failed to import config", e)
             _state.value = _state.value.copy(
                 status = ConnectionState.ERROR,
-                statusText = "Invalid config link"
+                statusText = Strings.current.stInvalidLink
             )
             false
         }
@@ -201,11 +202,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
      * Подключение: запуск proxy, затем WireGuard туннель через GoBackend.
      */
     fun connect() {
+        val s = Strings.current
         val profile = profileStore.selectedProfile
         if (profile == null) {
             _state.value = _state.value.copy(
                 status = ConnectionState.ERROR,
-                statusText = "No profile selected"
+                statusText = s.stNoProfile
             )
             return
         }
@@ -213,16 +215,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (profile.vkLink.isBlank() || profile.peerAddr.isBlank() || profile.wgQuickConfig.isBlank()) {
             _state.value = _state.value.copy(
                 status = ConnectionState.ERROR,
-                statusText = "Profile incomplete"
+                statusText = s.stProfileIncomplete
             )
             return
         }
 
         _state.value = _state.value.copy(
             status = ConnectionState.CONNECTING,
-            statusText = "Starting proxy..."
+            statusText = s.stStartingProxy
         )
-        LogStore.addFriendlyLog("Starting TurnGate")
+        LogStore.addFriendlyLog(s.fStartingTurnGate)
 
         viewModelScope.launch(Dispatchers.IO) {
             _captchaCount.value = 0
@@ -239,12 +241,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             if (!started) {
                 _state.value = _state.value.copy(
                     status = ConnectionState.ERROR,
-                    statusText = "Proxy failed to start"
+                    statusText = Strings.current.stProxyFailed
                 )
                 return@launch
             }
 
-            _state.value = _state.value.copy(statusText = "Proxy running, starting VPN...")
+            _state.value = _state.value.copy(statusText = Strings.current.stConnecting)
             delay(1000)
 
             // 2. Парсим wg-quick конфиг и поднимаем WireGuard туннель
@@ -271,8 +273,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 backend.setState(tunnel!!, Tunnel.State.UP, newConfig)
 
                 // Оставляем статус CONNECTING, показываем что ждём handshake
-                if (_state.value.statusText.isBlank() || _state.value.statusText == "Starting proxy…") {
-                    _state.value = _state.value.copy(statusText = "Establishing secure tunnel…")
+                val cur = _state.value.statusText
+                if (cur.isBlank() || cur == Strings.current.stStartingProxy) {
+                    _state.value = _state.value.copy(statusText = Strings.current.stWgHandshake)
                 }
 
                 // Ждём handshake - проверяем latestHandshakeEpochMillis у peer.
@@ -283,20 +286,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     TunVpnService.connectionState = ConnectionState.CONNECTED
                     _state.value = _state.value.copy(
                         status = ConnectionState.CONNECTED,
-                        statusText = "Connected"
+                        statusText = Strings.current.stConnected
                     )
-                    LogStore.addFriendlyLog("Connected — you are protected")
+                    LogStore.addFriendlyLog(Strings.current.fConnected)
                     LogStore.addAppLog("VPN tunnel UP - handshake complete with ${profile.peerAddr}")
                     Log.i(TAG, "VPN tunnel UP with handshake")
                 } else {
-                    // Таймаут ожидания handshake — откатываемся
                     Log.w(TAG, "Handshake timeout, rolling back")
                     try { backend.setState(tunnel!!, Tunnel.State.DOWN, null) } catch (_: Exception) {}
                     tunnel = null
                     proxyManager.stop()
                     _state.value = _state.value.copy(
                         status = ConnectionState.ERROR,
-                        statusText = "Handshake timeout — check proxy logs"
+                        statusText = Strings.current.stError
                     )
                     LogStore.addAppLog("Handshake timeout")
                 }
@@ -305,7 +307,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 proxyManager.stop()
                 _state.value = _state.value.copy(
                     status = ConnectionState.ERROR,
-                    statusText = "VPN failed: ${e.message}"
+                    statusText = Strings.current.stVpnFailed.format(e.message ?: "")
                 )
             }
         }
@@ -320,7 +322,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _showCaptchaDialog.value = false
         _state.value = _state.value.copy(
             status = ConnectionState.DISCONNECTING,
-            statusText = "Stopping…"
+            statusText = Strings.current.stDisconnecting
         )
         viewModelScope.launch(Dispatchers.IO) {
             try {
@@ -334,9 +336,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             TunVpnService.connectionState = ConnectionState.DISCONNECTED
             _state.value = _state.value.copy(
                 status = ConnectionState.DISCONNECTED,
-                statusText = "Disconnected"
+                statusText = Strings.current.stDisconnected
             )
-            LogStore.addAppLog("VPN disconnected")
+            LogStore.addFriendlyLog(Strings.current.fDisconnected)
         }
     }
 
@@ -389,6 +391,6 @@ data class UiState(
     val profiles: List<VpnProfile> = emptyList(),
     val selectedProfileId: String? = null,
     val status: ConnectionState = ConnectionState.DISCONNECTED,
-    val statusText: String = "Disconnected",
+    val statusText: String = "",
     val proxyLogs: List<String> = emptyList()
 )

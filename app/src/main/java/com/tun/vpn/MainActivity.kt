@@ -18,6 +18,8 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -72,10 +74,19 @@ class MainActivity : ComponentActivity() {
         setContent {
             val context = LocalContext.current
             val themeStore = remember { ThemeStore(context) }
+            val langStore = remember { LanguageStore(context) }
             var themeKey by remember { mutableStateOf(themeStore.themeKey) }
+            var langKey by remember { mutableStateOf(langStore.lang) }
             val theme = TgThemes.find { it.key == themeKey } ?: AuroraTheme
+            val strings = stringsFor(langKey)
 
-            CompositionLocalProvider(LocalTgTheme provides theme) {
+            // Синхронизируем глобальный Strings.current для ViewModel.
+            LaunchedEffect(langKey) { Strings.setLang(langKey) }
+
+            CompositionLocalProvider(
+                LocalTgTheme provides theme,
+                LocalStrings provides strings,
+            ) {
                 TurnGateTheme(theme) {
                     val vm: MainViewModel = viewModel()
                     viewModelRef = vm
@@ -94,6 +105,11 @@ class MainActivity : ComponentActivity() {
                         onThemeChange = { key ->
                             themeKey = key
                             themeStore.themeKey = key
+                        },
+                        langKey = langKey,
+                        onLangChange = { key ->
+                            langKey = key
+                            langStore.lang = key
                         },
                         onConnect = { vmRef ->
                             viewModelRef = vmRef
@@ -151,6 +167,8 @@ fun MainApp(
     vm: MainViewModel = viewModel(),
     themeKey: String,
     onThemeChange: (String) -> Unit,
+    langKey: String,
+    onLangChange: (String) -> Unit,
     onConnect: (MainViewModel) -> Unit
 ) {
     val theme = LocalTgTheme.current
@@ -183,7 +201,9 @@ fun MainApp(
                 onLogsClick = { currentScreen = Screen.LOGS },
                 onAboutClick = { currentScreen = Screen.ABOUT },
                 themeKey = themeKey,
-                onThemeChange = onThemeChange
+                onThemeChange = onThemeChange,
+                langKey = langKey,
+                onLangChange = onLangChange
             )
             Screen.LOGS -> LogViewScreen(onBack = { currentScreen = Screen.SETTINGS })
             Screen.ABOUT -> AboutScreen(onBack = { currentScreen = Screen.SETTINGS })
@@ -281,8 +301,9 @@ fun HomeScreen(
             ) {
                 Row(Modifier.padding(horizontal = 16.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
-                        Text("Update available", color = theme.connected, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-                        Text("v${info.versionName} · tap to install", color = theme.connected.copy(alpha = 0.75f), fontSize = 11.sp)
+                        val ts = LocalStrings.current
+                        Text(ts.updateAvailable, color = theme.connected, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                        Text("v${info.versionName} · ${ts.updateTapToInstall}", color = theme.connected.copy(alpha = 0.75f), fontSize = 11.sp)
                     }
                     Text("↓", color = theme.connected, fontSize = 18.sp, fontWeight = FontWeight.Bold)
                 }
@@ -318,8 +339,18 @@ fun HomeScreen(
                 )
                 Spacer(Modifier.width(10.dp))
             }
+            val t = LocalStrings.current
+            val statusLine = when {
+                state.statusText.isNotBlank() -> state.statusText
+                state.status == ConnectionState.DISCONNECTED -> t.stDisconnected
+                state.status == ConnectionState.CONNECTED -> t.stConnected
+                state.status == ConnectionState.CONNECTING -> t.stConnecting
+                state.status == ConnectionState.DISCONNECTING -> t.stDisconnecting
+                state.status == ConnectionState.ERROR -> t.stError
+                else -> t.stDisconnected
+            }
             Text(
-                text = state.statusText,
+                text = statusLine,
                 color = when (state.status) {
                     ConnectionState.CONNECTED -> theme.connected
                     ConnectionState.CONNECTING, ConnectionState.DISCONNECTING -> theme.connecting
@@ -456,9 +487,10 @@ fun ImportModal(
     onDismiss: () -> Unit
 ) {
     val theme = LocalTgTheme.current
+    val t = LocalStrings.current
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Add profile", color = theme.textPrimary) },
+        title = { Text(t.addTitle, color = theme.textPrimary) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(
@@ -466,16 +498,16 @@ fun ImportModal(
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(12.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = theme.accent)
-                ) { Text("Paste from clipboard", color = Color.White) }
+                ) { Text(t.pasteClip, color = Color.White) }
                 OutlinedButton(
                     onClick = onAddManually,
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(12.dp)
-                ) { Text("Configure manually", color = theme.textPrimary) }
+                ) { Text(t.addManual, color = theme.textPrimary) }
             }
         },
         confirmButton = {},
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel", color = theme.textSecondary) } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(t.cancel, color = theme.textSecondary) } },
         containerColor = theme.bg1
     )
 }
@@ -490,14 +522,17 @@ fun GlobalSettingsScreen(
     onAboutClick: () -> Unit,
     themeKey: String,
     onThemeChange: (String) -> Unit,
+    langKey: String,
+    onLangChange: (String) -> Unit,
     vm: MainViewModel = viewModel()
 ) {
     val theme = LocalTgTheme.current
+    val t = LocalStrings.current
     val update by vm.updateInfo.collectAsStateWithLifecycle()
 
     Column(modifier = Modifier.fillMaxSize().statusBarsPadding()) {
         TopAppBar(
-            title = { Text("Settings", color = theme.textPrimary) },
+            title = { Text(t.settings, color = theme.textPrimary) },
             navigationIcon = {
                 IconButton(onClick = onBack) {
                     Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = theme.accent)
@@ -509,39 +544,73 @@ fun GlobalSettingsScreen(
         Column(
             modifier = Modifier
                 .fillMaxSize()
+                .verticalScroll(rememberScrollState())
                 .padding(horizontal = 20.dp),
             verticalArrangement = Arrangement.spacedBy(0.dp)
         ) {
-            // Appearance section
-            SectionLabel("Appearance")
+            SectionLabel(t.appearance)
             ThemePicker(themeKey = themeKey, onThemeChange = onThemeChange)
 
             Spacer(Modifier.height(24.dp))
-            SectionLabel("Navigation")
+            SectionLabel(t.language)
+            LanguagePicker(langKey = langKey, onLangChange = onLangChange)
+
+            Spacer(Modifier.height(24.dp))
+            SectionLabel(t.navigation)
 
             SettingsNavRow(
                 icon = { Icon(Icons.Filled.ArrowDropDown, null, tint = theme.accent, modifier = Modifier.size(20.dp)) },
-                title = "Activity & logs",
-                subtitle = "See what's happening under the hood",
+                title = t.viewLogs,
+                subtitle = t.viewLogsSub,
                 onClick = onLogsClick
             )
             Spacer(Modifier.height(8.dp))
             SettingsNavRow(
                 icon = { Icon(Icons.Filled.Settings, null, tint = theme.accent, modifier = Modifier.size(20.dp)) },
-                title = "About TurnGate",
-                subtitle = "Version, credits, source",
+                title = t.about,
+                subtitle = t.aboutSub,
                 onClick = onAboutClick
             )
 
             if (update != null) {
                 Spacer(Modifier.height(24.dp))
-                SectionLabel("Updates")
+                SectionLabel(t.updateAvailable)
                 Button(
                     onClick = { vm.downloadUpdate() },
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(12.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = theme.connected)
-                ) { Text("Download v${update!!.versionName}", color = Color.Black) }
+                ) { Text("v${update!!.versionName}", color = Color.Black) }
+            }
+
+            Spacer(Modifier.height(32.dp))
+        }
+    }
+}
+
+@Composable
+fun LanguagePicker(langKey: String, onLangChange: (String) -> Unit) {
+    val theme = LocalTgTheme.current
+    val t = LocalStrings.current
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+        listOf("en" to t.langEn, "ru" to t.langRu).forEach { (code, label) ->
+            val active = langKey == code
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(if (active) theme.accent.copy(alpha = 0.18f) else theme.surface)
+                    .border(1.dp, if (active) theme.accent.copy(alpha = 0.6f) else theme.surfaceBorder, RoundedCornerShape(14.dp))
+                    .clickable(indication = null, interactionSource = remember { MutableInteractionSource() }) { onLangChange(code) }
+                    .padding(vertical = 12.dp, horizontal = 14.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = label,
+                    color = if (active) theme.accent else theme.textPrimary,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.SemiBold
+                )
             }
         }
     }
@@ -917,11 +986,13 @@ fun ConnectButton(status: ConnectionState, enabled: Boolean, onClick: () -> Unit
             CircularProgressIndicator(modifier = Modifier.size(22.dp), color = Color.White, strokeWidth = 2.5.dp)
             Spacer(Modifier.width(12.dp))
         }
+        val tt = LocalStrings.current
         Text(
             text = when {
-                isConnecting -> "Connecting…"
-                isConnected -> "Disconnect"
-                else -> "Connect"
+                status == ConnectionState.ERROR -> tt.btnRetry
+                isConnecting -> tt.btnConnecting
+                isConnected -> tt.btnDisconnect
+                else -> tt.btnConnect
             },
             fontSize = 18.sp,
             fontWeight = FontWeight.SemiBold,

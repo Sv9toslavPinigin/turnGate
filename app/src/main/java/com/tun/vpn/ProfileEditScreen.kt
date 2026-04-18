@@ -91,8 +91,9 @@ fun ProfileEditScreen(
             .fillMaxSize()
             .statusBarsPadding()
     ) {
+        val t = LocalStrings.current
         TopAppBar(
-            title = { Text("Edit Profile") },
+            title = { Text(t.editProfile) },
             navigationIcon = {
                 IconButton(onClick = onBack) {
                     Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = theme.accent)
@@ -108,42 +109,42 @@ fun ProfileEditScreen(
                 .padding(horizontal = 24.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            SectionLabel("Profile")
+            SectionLabel(t.secProfile)
 
             ProfileField(
                 value = name,
                 onValueChange = { name = it },
-                label = "Name",
+                label = t.nameLabel,
                 placeholder = "My Server"
             )
 
-            SectionLabel("Proxy Settings")
+            SectionLabel(t.secProxy)
 
             ProfileField(
                 value = vkLink,
                 onValueChange = { vkLink = it },
-                label = "TURN Server URL",
+                label = t.turnUrl,
                 placeholder = "https://vk.com/call/join/..."
             )
 
             ProfileField(
                 value = peerAddr,
                 onValueChange = { peerAddr = it },
-                label = "Peer Address",
+                label = t.peerAddr,
                 placeholder = "IP:PORT"
             )
 
             ProfileField(
                 value = listenAddr,
                 onValueChange = { listenAddr = it },
-                label = "Listen Address",
+                label = t.listenAddr,
                 placeholder = "127.0.0.1:9000"
             )
 
             ProfileField(
                 value = nValue.toString(),
                 onValueChange = { nValue = it.toIntOrNull() ?: 16 },
-                label = "Connections (n)",
+                label = t.conns,
                 placeholder = "16",
                 keyboardType = KeyboardType.Number
             )
@@ -155,11 +156,18 @@ fun ProfileEditScreen(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(
-                    text = "Manual captcha",
-                    color = Color(0xFFF1F5F9),
-                    fontSize = 14.sp
-                )
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        text = t.manualCaptcha,
+                        color = Color(0xFFF1F5F9),
+                        fontSize = 14.sp
+                    )
+                    Text(
+                        text = t.manualCaptchaSub,
+                        color = theme.textSecondary,
+                        fontSize = 12.sp
+                    )
+                }
                 Switch(
                     checked = manualCaptcha,
                     onCheckedChange = { manualCaptcha = it },
@@ -170,7 +178,7 @@ fun ProfileEditScreen(
                 )
             }
 
-            SectionLabel("WireGuard Config")
+            SectionLabel(t.secWg)
 
             OutlinedTextField(
                 value = wgConfig,
@@ -216,7 +224,7 @@ fun ProfileEditScreen(
                     tint = theme.error,
                     modifier = Modifier.padding(end = 8.dp)
                 )
-                Text("Delete Profile", color = theme.error)
+                Text(t.deleteProfile, color = theme.error)
             }
 
             Spacer(modifier = Modifier.height(32.dp))
@@ -225,22 +233,23 @@ fun ProfileEditScreen(
 
     // Delete confirmation dialog
     if (showDeleteDialog) {
+        val td = LocalStrings.current
         AlertDialog(
             onDismissRequest = { showDeleteDialog = false },
-            title = { Text("Delete Profile") },
-            text = { Text("Delete \"$name\"? This cannot be undone.") },
+            title = { Text(td.deleteProfile) },
+            text = { Text(td.deleteConfirmTitle.format(name) + " " + td.deleteConfirmBody) },
             confirmButton = {
                 TextButton(onClick = {
                     showDeleteDialog = false
                     onDelete(profile.id)
                     onBack()
                 }) {
-                    Text("Delete", color = theme.error)
+                    Text(td.deleteWord, color = theme.error)
                 }
             },
             dismissButton = {
                 TextButton(onClick = { showDeleteDialog = false }) {
-                    Text("Cancel")
+                    Text(td.cancel)
                 }
             }
         )

@@ -39,6 +39,7 @@ import androidx.compose.ui.unit.sp
 @Composable
 fun AboutScreen(onBack: () -> Unit) {
     val theme = LocalTgTheme.current
+    val t = LocalStrings.current
     val context = LocalContext.current
 
     Column(
@@ -47,7 +48,7 @@ fun AboutScreen(onBack: () -> Unit) {
             .statusBarsPadding()
     ) {
         TopAppBar(
-            title = { Text("About", color = theme.textPrimary) },
+            title = { Text(t.about, color = theme.textPrimary) },
             navigationIcon = {
                 IconButton(onClick = onBack) {
                     Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = theme.accent)
@@ -116,7 +117,7 @@ fun AboutScreen(onBack: () -> Unit) {
             )
 
             Text(
-                text = "v${BuildConfig.VERSION_NAME}",
+                text = "${t.verPrefix} ${BuildConfig.VERSION_NAME}",
                 fontSize = 14.sp,
                 color = theme.textSecondary,
                 modifier = Modifier.padding(top = 4.dp)
@@ -125,16 +126,10 @@ fun AboutScreen(onBack: () -> Unit) {
             Spacer(modifier = Modifier.height(8.dp))
 
             Text(
-                text = "VPN client using VK TURN proxy",
+                text = t.aboutDesc,
                 fontSize = 14.sp,
-                color = theme.textSecondary
-            )
-
-            Text(
-                text = "Open source · no telemetry",
-                fontSize = 12.sp,
-                color = theme.textTertiary,
-                modifier = Modifier.padding(top = 4.dp)
+                color = theme.textSecondary,
+                modifier = Modifier.padding(horizontal = 8.dp)
             )
 
             Spacer(modifier = Modifier.height(32.dp))
@@ -146,7 +141,7 @@ fun AboutScreen(onBack: () -> Unit) {
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(12.dp)
             ) {
-                Text("GitHub: vk-turn-proxy", color = theme.textPrimary)
+                Text(t.srcProxy, color = theme.textPrimary)
             }
 
             Spacer(modifier = Modifier.height(8.dp))
@@ -158,7 +153,7 @@ fun AboutScreen(onBack: () -> Unit) {
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(12.dp)
             ) {
-                Text("GitHub: TurnBridge", color = theme.textPrimary)
+                Text(t.srcBridge, color = theme.textPrimary)
             }
         }
     }

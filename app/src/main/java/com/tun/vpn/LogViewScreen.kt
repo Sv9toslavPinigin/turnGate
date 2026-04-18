@@ -99,8 +99,9 @@ fun LogViewScreen(onBack: () -> Unit) {
             .fillMaxSize()
             .statusBarsPadding()
     ) {
+        val t = LocalStrings.current
         TopAppBar(
-            title = { Text("Activity ${displayEntries.size}/$totalForMode", color = theme.textPrimary) },
+            title = { Text("${t.activity} ${displayEntries.size}/$totalForMode", color = theme.textPrimary) },
             navigationIcon = {
                 IconButton(onClick = onBack) {
                     Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = theme.accent)
@@ -118,7 +119,7 @@ fun LogViewScreen(onBack: () -> Unit) {
                     val text = displayEntries.joinToString("\n") { it.formatted() }
                     val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                     clipboard.setPrimaryClip(ClipData.newPlainText("logs", text))
-                    Toast.makeText(context, "Copied ${displayEntries.size} lines", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(context, t.copiedLines.format(displayEntries.size), Toast.LENGTH_SHORT).show()
                 }) {
                     Icon(Icons.Filled.ContentCopy, "Copy", tint = theme.textSecondary)
                 }
@@ -147,7 +148,7 @@ fun LogViewScreen(onBack: () -> Unit) {
                 .clip(RoundedCornerShape(12.dp))
                 .background(theme.surface)
         ) {
-            listOf("friendly" to "Friendly", "raw" to "Raw").forEach { (key, label) ->
+            listOf("friendly" to t.friendly, "raw" to t.raw).forEach { (key, label) ->
                 val active = mode == key
                 Box(
                     modifier = Modifier
@@ -177,7 +178,7 @@ fun LogViewScreen(onBack: () -> Unit) {
         OutlinedTextField(
             value = searchQuery,
             onValueChange = { searchQuery = it },
-            placeholder = { Text("Search…", color = theme.textSecondary.copy(alpha = 0.5f)) },
+            placeholder = { Text(t.searchLogs, color = theme.textSecondary.copy(alpha = 0.5f)) },
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 16.dp),
@@ -207,14 +208,19 @@ fun LogViewScreen(onBack: () -> Unit) {
                 TgFilterChip(
                     selected = selectedSource == null,
                     onClick = { selectedSource = null },
-                    label = "All",
+                    label = t.logsAll,
                     theme = theme
                 )
                 LogSource.entries.forEach { source ->
+                    val label = when (source) {
+                        LogSource.APP -> t.logsApp
+                        LogSource.PROXY -> t.logsTp
+                        LogSource.WIREGUARD -> t.logsWg
+                    }
                     TgFilterChip(
                         selected = selectedSource == source,
                         onClick = { selectedSource = if (selectedSource == source) null else source },
-                        label = source.displayName,
+                        label = label,
                         theme = theme
                     )
                 }
@@ -235,8 +241,7 @@ fun LogViewScreen(onBack: () -> Unit) {
         if (displayEntries.isEmpty()) {
             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Text(
-                    text = if (allEntries.isEmpty()) "Nothing yet — connect to start streaming activity."
-                           else "No matching logs",
+                    text = if (allEntries.isEmpty()) t.noLogs else t.noMatchingLogs,
                     color = theme.textSecondary,
                     fontSize = 13.sp,
                     modifier = Modifier.padding(horizontal = 32.dp)

@@ -120,15 +120,16 @@ fun CaptchaWebViewDialog(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.Top
             ) {
+                val t = LocalStrings.current
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = if (captchaIndex > 0) "Step $captchaIndex of ~" else "Quick check",
+                        text = if (captchaIndex > 0) "#$captchaIndex · ${t.captchaTitle}" else t.captchaTitle,
                         color = theme.textPrimary,
                         fontSize = 17.sp,
                         fontWeight = FontWeight.SemiBold
                     )
                     Text(
-                        text = "VK may show several checks in a row. Sit tight.",
+                        text = t.captchaHint,
                         color = theme.textSecondary,
                         fontSize = 11.sp,
                         modifier = Modifier.padding(top = 3.dp)
@@ -140,7 +141,7 @@ fun CaptchaWebViewDialog(
                     shape = RoundedCornerShape(10.dp),
                     colors = ButtonDefaults.outlinedButtonColors(contentColor = theme.textSecondary)
                 ) {
-                    Text("Refresh", fontSize = 12.sp)
+                    Text(t.refresh, fontSize = 12.sp)
                 }
                 Spacer(Modifier.width(6.dp))
                 Button(
@@ -148,7 +149,7 @@ fun CaptchaWebViewDialog(
                     shape = RoundedCornerShape(10.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = theme.error)
                 ) {
-                    Text("Cancel", fontSize = 12.sp, color = Color.White)
+                    Text(t.cancel, fontSize = 12.sp, color = Color.White)
                 }
             }
 

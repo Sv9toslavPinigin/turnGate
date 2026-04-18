@@ -68,3 +68,17 @@ class ThemeStore(context: Context) {
         get() = prefs.getString("key", "aurora") ?: "aurora"
         set(v) { prefs.edit().putString("key", v).apply() }
 }
+
+class LanguageStore(context: Context) {
+    private val prefs: SharedPreferences =
+        context.getSharedPreferences("tg_lang", Context.MODE_PRIVATE)
+
+    var lang: String
+        get() = prefs.getString("lang", defaultLang()) ?: defaultLang()
+        set(v) { prefs.edit().putString("lang", v).apply() }
+
+    private fun defaultLang(): String {
+        val sys = java.util.Locale.getDefault().language
+        return if (sys == "ru") "ru" else "en"
+    }
+}
