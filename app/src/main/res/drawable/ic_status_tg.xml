@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Monochrome TG monogram for status bar.
+    Must be single-color (tint is applied by the system). Viewport 24x24.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24"
+    android:tint="?android:attr/colorControlNormal">
+
+    <!-- G arc: 306deg, center (12,12), radius 8 -->
+    <path
+        android:pathData="M20,12 A8,8 0 1 1 16.7,5.53"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="2.5"
+        android:strokeLineCap="round" />
+
+    <!-- G bar -->
+    <path
+        android:pathData="M20,12 L15,12"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="2.5"
+        android:strokeLineCap="round" />
+
+    <!-- T crossbar -->
+    <path
+        android:pathData="M7,7 L17,7"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="2.5"
+        android:strokeLineCap="round" />
+
+    <!-- T stem -->
+    <path
+        android:pathData="M12,7 L12,17"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="2.5"
+        android:strokeLineCap="round" />
+</vector>

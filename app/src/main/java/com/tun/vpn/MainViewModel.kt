@@ -50,6 +50,20 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         refreshProfileState()
         checkForUpdates()
 
+        // Реактивно обновляем status-bar notification (issue #2).
+        viewModelScope.launch {
+            var lastStatus: ConnectionState? = null
+            var lastProfileName: String? = null
+            _state.collect { st ->
+                val profileName = st.profiles.find { it.id == st.selectedProfileId }?.name
+                if (st.status != lastStatus || profileName != lastProfileName) {
+                    TunVpnService.updateState(st.status, profileName)
+                    lastStatus = st.status
+                    lastProfileName = profileName
+                }
+            }
+        }
+
         // Собираем логи прокси
         viewModelScope.launch {
             proxyManager.logs.collect { logs ->

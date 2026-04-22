@@ -73,6 +73,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         pendingDeepLink = intent?.data?.toString()?.takeIf { it.startsWith("turnbridge://") }
+        handleNotificationAction(intent)
 
         setContent {
             val context = LocalContext.current
@@ -135,6 +136,14 @@ class MainActivity : ComponentActivity() {
         val uri = intent.data?.toString()
         if (uri != null && uri.startsWith("turnbridge://")) {
             viewModelRef?.importConfig(uri)
+        }
+        handleNotificationAction(intent)
+    }
+
+    /** Ловим intent.action == ACTION_DISCONNECT от кнопки в notification. */
+    private fun handleNotificationAction(intent: Intent?) {
+        if (intent?.action == TunVpnService.ACTION_DISCONNECT) {
+            viewModelRef?.disconnect()
         }
     }
 }
