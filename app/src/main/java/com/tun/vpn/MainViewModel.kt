@@ -272,14 +272,41 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 val ctx = getApplication<Application>()
                 val config = Config.parse(BufferedReader(StringReader(profile.wgQuickConfig)))
 
-                // Исключаем своё приложение из VPN чтобы не было петли
+                // Глобальные правила per-app маршрутизации (issue #1).
+                val routingStore = RoutingStore(ctx)
+                val self = ctx.packageName
+                val mode = routingStore.mode
+                val appList = routingStore.appList
+
                 val existingIface = config.`interface`
                 val newIface = com.wireguard.config.Interface.Builder().apply {
                     parsePrivateKey(existingIface.keyPair.privateKey.toBase64())
                     existingIface.addresses.forEach { addAddress(it) }
                     existingIface.dnsServers.forEach { addDnsServer(it) }
                     existingIface.mtu.ifPresent { setMtu(it) }
-                    excludeApplication(ctx.packageName)
+
+                    when (mode) {
+                        RoutingMode.EVERYTHING -> {
+                            // Default: весь трафик в VPN, кроме нашего пакета (нет петли).
+                            excludeApplication(self)
+                        }
+                        RoutingMode.WHITELIST -> {
+                            // Только выбранные приложения идут через VPN.
+                            // self в список не добавляем — он сам в обход.
+                            // Если пользователь не выбрал ничего, чтобы VPN всё-таки поднимался,
+                            // пускаем self в whitelist (иначе интерфейс без маршрутов).
+                            if (appList.isEmpty()) {
+                                includeApplication(self)
+                            } else {
+                                appList.forEach { includeApplication(it) }
+                            }
+                        }
+                        RoutingMode.BLACKLIST -> {
+                            // Все, кроме выбранных + self.
+                            excludeApplication(self)
+                            appList.forEach { if (it != self) excludeApplication(it) }
+                        }
+                    }
                 }.build()
 
                 val newConfig = Config.Builder()

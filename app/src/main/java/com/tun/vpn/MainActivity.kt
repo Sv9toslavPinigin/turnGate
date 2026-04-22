@@ -150,7 +150,7 @@ class MainActivity : ComponentActivity() {
 
 // ===== Navigation =====
 
-enum class Screen { HOME, SETTINGS, LOGS, ABOUT, PROFILE_EDIT }
+enum class Screen { HOME, SETTINGS, LOGS, ABOUT, PROFILE_EDIT, ROUTING }
 
 // ===== Theme wrapper =====
 
@@ -231,11 +231,13 @@ fun MainApp(
                 onBack = { currentScreen = Screen.HOME },
                 onLogsClick = { currentScreen = Screen.LOGS },
                 onAboutClick = { currentScreen = Screen.ABOUT },
+                onRoutingClick = { currentScreen = Screen.ROUTING },
                 themeKey = themeKey,
                 onThemeChange = onThemeChange,
                 langKey = langKey,
                 onLangChange = onLangChange
             )
+            Screen.ROUTING -> AppRoutingScreen(onBack = { currentScreen = Screen.SETTINGS })
             Screen.LOGS -> LogViewScreen(onBack = { currentScreen = Screen.SETTINGS })
             Screen.ABOUT -> AboutScreen(onBack = { currentScreen = Screen.SETTINGS })
             Screen.PROFILE_EDIT -> {
@@ -575,6 +577,7 @@ fun GlobalSettingsScreen(
     onBack: () -> Unit,
     onLogsClick: () -> Unit,
     onAboutClick: () -> Unit,
+    onRoutingClick: () -> Unit,
     themeKey: String,
     onThemeChange: (String) -> Unit,
     langKey: String,
@@ -613,6 +616,13 @@ fun GlobalSettingsScreen(
             Spacer(Modifier.height(24.dp))
             SectionLabel(t.navigation)
 
+            SettingsNavRow(
+                icon = { Icon(Icons.Filled.ArrowDropDown, null, tint = theme.accent, modifier = Modifier.size(20.dp)) },
+                title = t.routing,
+                subtitle = t.routingSub,
+                onClick = onRoutingClick
+            )
+            Spacer(Modifier.height(8.dp))
             SettingsNavRow(
                 icon = { Icon(Icons.Filled.ArrowDropDown, null, tint = theme.accent, modifier = Modifier.size(20.dp)) },
                 title = t.viewLogs,
