@@ -150,7 +150,7 @@ class MainActivity : ComponentActivity() {
 
 // ===== Navigation =====
 
-enum class Screen { HOME, SETTINGS, LOGS, ABOUT, PROFILE_EDIT, ROUTING }
+enum class Screen { HOME, SETTINGS, LOGS, ABOUT, PROFILE_EDIT, ROUTING, TRAFFIC_RULES }
 
 // ===== Theme wrapper =====
 
@@ -232,12 +232,14 @@ fun MainApp(
                 onLogsClick = { currentScreen = Screen.LOGS },
                 onAboutClick = { currentScreen = Screen.ABOUT },
                 onRoutingClick = { currentScreen = Screen.ROUTING },
+                onTrafficRulesClick = { currentScreen = Screen.TRAFFIC_RULES },
                 themeKey = themeKey,
                 onThemeChange = onThemeChange,
                 langKey = langKey,
                 onLangChange = onLangChange
             )
             Screen.ROUTING -> AppRoutingScreen(onBack = { currentScreen = Screen.SETTINGS })
+            Screen.TRAFFIC_RULES -> TrafficRulesScreen(onBack = { currentScreen = Screen.SETTINGS })
             Screen.LOGS -> LogViewScreen(onBack = { currentScreen = Screen.SETTINGS })
             Screen.ABOUT -> AboutScreen(onBack = { currentScreen = Screen.SETTINGS })
             Screen.PROFILE_EDIT -> {
@@ -578,6 +580,7 @@ fun GlobalSettingsScreen(
     onLogsClick: () -> Unit,
     onAboutClick: () -> Unit,
     onRoutingClick: () -> Unit,
+    onTrafficRulesClick: () -> Unit,
     themeKey: String,
     onThemeChange: (String) -> Unit,
     langKey: String,
@@ -618,9 +621,16 @@ fun GlobalSettingsScreen(
 
             SettingsNavRow(
                 icon = { Icon(Icons.Filled.ArrowDropDown, null, tint = theme.accent, modifier = Modifier.size(20.dp)) },
-                title = t.routing,
-                subtitle = t.routingSub,
+                title = t.perApp,
+                subtitle = t.perAppSub,
                 onClick = onRoutingClick
+            )
+            Spacer(Modifier.height(8.dp))
+            SettingsNavRow(
+                icon = { Icon(Icons.Filled.ArrowDropDown, null, tint = theme.accent, modifier = Modifier.size(20.dp)) },
+                title = t.trafficRules,
+                subtitle = t.trafficRulesSub,
+                onClick = onTrafficRulesClick
             )
             Spacer(Modifier.height(8.dp))
             SettingsNavRow(

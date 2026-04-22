@@ -39,15 +39,39 @@ class RoutingStore(context: Context) {
         get() = prefs.getBoolean(KEY_SHOW_SYSTEM, false)
         set(v) { prefs.edit().putBoolean(KEY_SHOW_SYSTEM, v).apply() }
 
+    /** Правила, которые прогоняются через VPN (CIDR, IP, домен, `*.wildcard`). */
+    var routeThroughVpn: List<String>
+        get() = readList(KEY_ROUTE_VPN)
+        set(v) = writeList(KEY_ROUTE_VPN, v)
+
+    /** Правила, которые идут в обход VPN (LAN по умолчанию). */
+    var bypassVpn: List<String>
+        get() = readList(KEY_BYPASS_VPN)
+        set(v) = writeList(KEY_BYPASS_VPN, v)
+
     fun togglePackage(pkg: String) {
         val cur = appList.toMutableSet()
         if (pkg in cur) cur.remove(pkg) else cur.add(pkg)
         appList = cur
     }
 
+    private fun readList(key: String): List<String> {
+        val raw = prefs.getString(key, "[]") ?: "[]"
+        val arr = JSONArray(raw)
+        return (0 until arr.length()).map { arr.getString(it) }
+    }
+
+    private fun writeList(key: String, v: List<String>) {
+        val arr = JSONArray()
+        v.forEach { arr.put(it) }
+        prefs.edit().putString(key, arr.toString()).apply()
+    }
+
     companion object {
         private const val KEY_MODE = "mode"
         private const val KEY_APP_LIST = "app_list"
         private const val KEY_SHOW_SYSTEM = "show_system_apps"
+        private const val KEY_ROUTE_VPN = "route_through_vpn"
+        private const val KEY_BYPASS_VPN = "bypass_vpn"
     }
 }

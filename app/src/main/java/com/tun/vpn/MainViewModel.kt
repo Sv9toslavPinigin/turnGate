@@ -309,9 +309,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     }
                 }.build()
 
+                // Собираем AllowedIPs: (дефолт из wgQuickConfig) + routeThroughVpn - bypassVpn.
+                val customAllowed = resolveRouteRules(routingStore.routeThroughVpn)
+                val customBypass = resolveRouteRules(routingStore.bypassVpn)
+                val adjustedPeers = config.peers.map { peer ->
+                    buildPeerWithRouting(peer, customAllowed, customBypass)
+                }
+
                 val newConfig = Config.Builder()
                     .setInterface(newIface)
-                    .apply { config.peers.forEach { addPeer(it) } }
+                    .apply { adjustedPeers.forEach { addPeer(it) } }
                     .build()
 
                 tunnel = WgTunnel()
@@ -410,6 +417,58 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             delay(1000)
         }
         return false
+    }
+
+    /**
+     * Превращает набор строковых правил в IPv4 CIDR-префиксы через [RouteResolver].
+     * Невалидные/нерезолвящиеся — молча дропает (залогированы внутри).
+     */
+    private suspend fun resolveRouteRules(raw: List<String>): List<Subnet> {
+        if (raw.isEmpty()) return emptyList()
+        val parsed = raw.map { RouteRule.parse(it) }
+        val cidrs = RouteResolver.resolveAll(parsed)
+        return cidrs.mapNotNull { Subnet.parse(it) }
+    }
+
+    /**
+     * Перестраивает peer с учётом кастомных правил:
+     * - если нет правил — возвращает peer как есть.
+     * - [customAllowed] — добавляются к AllowedIPs.
+     * - [customBypass] — вычитаются из AllowedIPs через subnet subtraction.
+     */
+    private fun buildPeerWithRouting(
+        peer: com.wireguard.config.Peer,
+        customAllowed: List<Subnet>,
+        customBypass: List<Subnet>
+    ): com.wireguard.config.Peer {
+        if (customAllowed.isEmpty() && customBypass.isEmpty()) return peer
+
+        // Собираем текущий AllowedIPs → Subnet list.
+        val baseline: List<Subnet> = peer.allowedIps.mapNotNull { inetNetwork ->
+            val cidr = inetNetwork.toString() // "0.0.0.0/0" или "10.0.0.0/8"
+            Subnet.parse(cidr)
+        }
+
+        // Bypass: вычитаем из каждой baseline-подсети.
+        val afterBypass: List<Subnet> = if (customBypass.isNotEmpty()) {
+            baseline.flatMap { subtractMany(it, customBypass) }
+        } else baseline
+
+        // Дополнительно add customAllowed (могут быть избыточными — это ок, wg нормализует).
+        val merged: List<Subnet> = (afterBypass + customAllowed).distinct()
+
+        // Лимит Android VpnService ~1000 маршрутов — capped.
+        val capped = merged.take(900)
+
+        val builder = com.wireguard.config.Peer.Builder()
+            .parsePublicKey(peer.publicKey.toBase64())
+        peer.preSharedKey.ifPresent { builder.setPreSharedKey(it) }
+        peer.endpoint.ifPresent { builder.setEndpoint(it) }
+        peer.persistentKeepalive.ifPresent { builder.setPersistentKeepalive(it) }
+        capped.forEach { subnet ->
+            builder.addAllowedIp(com.wireguard.config.InetNetwork.parse(subnet.toCidr()))
+        }
+        return builder.build()
     }
 
     override fun onCleared() {
