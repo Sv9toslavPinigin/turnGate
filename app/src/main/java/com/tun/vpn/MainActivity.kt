@@ -1018,8 +1018,11 @@ private fun UpdateBlock(vm: MainViewModel) {
                     if (!checking) {
                         checking = true
                         lastCheckOk = false
-                        vm.viewModelScope.launch(Dispatchers.IO) {
-                            val result = UpdateChecker.check()
+                        vm.viewModelScope.launch {
+                            // IO — сетевой запрос, Main — UI-изменения + Toast.
+                            val result = kotlinx.coroutines.withContext(Dispatchers.IO) {
+                                UpdateChecker.check()
+                            }
                             vm.setUpdateInfo(result)
                             checking = false
                             lastCheckOk = result == null
