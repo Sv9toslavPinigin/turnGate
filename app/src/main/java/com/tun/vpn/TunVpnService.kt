@@ -4,49 +4,75 @@ import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
+import android.app.Service
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.graphics.Color
 import android.os.Build
+import android.os.IBinder
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
-import com.wireguard.android.backend.GoBackend
 
 /**
- * VPN-сервис, наследующий GoBackend.VpnService.
+ * Standalone foreground service отображающий статус VPN в шторке.
  *
- * Поддерживает stateful notification: иконка TG + заголовок/текст меняются
- * в зависимости от статуса подключения. Обновление приходит из ViewModel
- * через companion static-reference (см. [updateState]).
+ * NB: не расширяем GoBackend.VpnService и не объявляем intent-filter
+ * android.net.VpnService — такой сервис WireGuardKit запускает сам (его inner
+ * class GoBackend$VpnService), и наш сабкласс никогда не стартовал. Вместо
+ * этого — обычный service, который стартуется нами параллельно с wg-backend.
+ *
+ * Используется только для UI-нотификации, сетевое соединение держит GoBackend.
  */
-class TunVpnService : GoBackend.VpnService() {
+class TunVpnService : Service() {
 
     override fun onCreate() {
         super.onCreate()
         instance = this
         createNotificationChannel()
-        // Первичный foreground — "Connecting...", потом VM перебьёт.
-        startForegroundCompat(buildNotification(ConnectionState.CONNECTING, null))
-        Log.i(TAG, "VpnService created")
+        Log.i(TAG, "TunVpnService created")
+    }
+
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        val state = when (intent?.action) {
+            ACTION_UPDATE -> (intent.getSerializableExtra(EXTRA_STATE) as? ConnectionState)
+                ?: ConnectionState.CONNECTING
+            else -> ConnectionState.CONNECTING
+        }
+        val profileName = intent?.getStringExtra(EXTRA_PROFILE_NAME)
+
+        // Всегда удерживаем foreground status, пока сервис активен.
+        val n = buildNotification(state, profileName)
+        startForegroundCompat(n)
+
+        connectionState = state
+        return START_STICKY
+    }
+
+    override fun onBind(intent: Intent?): IBinder? = null
+
+    /**
+     * Когда task swiped из recents — НЕ останавливаем сервис. На стоковом
+     * Android foreground service этим live через процесс; на MIUI это кладёт
+     * болт на kill-policy, но хотя бы не мы его инициируем.
+     */
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        super.onTaskRemoved(rootIntent)
+        Log.i(TAG, "onTaskRemoved — keeping VPN alive")
     }
 
     override fun onDestroy() {
-        Log.i(TAG, "VpnService destroyed")
-        connectionState = ConnectionState.DISCONNECTED
+        Log.i(TAG, "TunVpnService destroyed")
         instance = null
         stopForeground(STOP_FOREGROUND_REMOVE)
         super.onDestroy()
     }
 
-    /**
-     * Пересобрать notification под текущий статус (из ViewModel).
-     * Если state == DISCONNECTED — убираем foreground и даём сервису умереть.
-     */
     fun refreshNotification(state: ConnectionState, profileName: String?) {
         connectionState = state
         if (state == ConnectionState.DISCONNECTED) {
             stopForeground(STOP_FOREGROUND_REMOVE)
+            stopSelf()
             return
         }
         val n = buildNotification(state, profileName)
@@ -62,21 +88,25 @@ class TunVpnService : GoBackend.VpnService() {
     }
 
     private fun createNotificationChannel() {
+        val nm = getSystemService(NotificationManager::class.java)
+        // Удаляем старый LOW-канал, чтобы обновлённый IMPORTANCE_DEFAULT подхватился.
+        runCatching { nm.deleteNotificationChannel("tun_vpn_channel") }
         val channel = NotificationChannel(
             CHANNEL_ID,
             "VPN status",
-            NotificationManager.IMPORTANCE_LOW
+            NotificationManager.IMPORTANCE_DEFAULT
         ).apply {
             description = "Shows ongoing VPN status and a Disconnect action"
             setShowBadge(false)
+            setSound(null, null)
+            enableVibration(false)
         }
-        getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
+        nm.createNotificationChannel(channel)
     }
 
     private fun buildNotification(state: ConnectionState, profileName: String?): Notification {
         val s = Strings.current
 
-        // Tap → open MainActivity (foreground).
         val openIntent = Intent(this, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
         }
@@ -85,7 +115,6 @@ class TunVpnService : GoBackend.VpnService() {
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
 
-        // Disconnect action → open MainActivity with special action.
         val disconnectIntent = Intent(this, MainActivity::class.java).apply {
             action = ACTION_DISCONNECT
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
@@ -147,12 +176,14 @@ class TunVpnService : GoBackend.VpnService() {
 
     companion object {
         private const val TAG = "TunVpnService"
-        private const val CHANNEL_ID = "tun_vpn_channel"
+        private const val CHANNEL_ID = "tun_vpn_status_v2"
         private const val NOTIFICATION_ID = 1
 
         const val ACTION_DISCONNECT = "com.tun.vpn.ACTION_DISCONNECT"
+        const val ACTION_UPDATE = "com.tun.vpn.ACTION_UPDATE"
+        const val EXTRA_STATE = "state"
+        const val EXTRA_PROFILE_NAME = "profile_name"
 
-        // Цвета берём не из темы (тема compose), а константные чтобы не таскать context.
         private val ACCENT_GREEN = Color.parseColor("#10B981")
         private val ACCENT_ORANGE = Color.parseColor("#F59E0B")
         private val ACCENT_RED = Color.parseColor("#EF4444")
@@ -165,12 +196,31 @@ class TunVpnService : GoBackend.VpnService() {
         private var instance: TunVpnService? = null
 
         /**
-         * Вызывается из MainViewModel при каждом изменении статуса/активного
-         * профиля. No-op если сервис ещё не запущен.
+         * Стартует сервис (если ещё не запущен) и обновляет notification
+         * под новое состояние. Вызывается из MainViewModel при каждом изменении
+         * status / активного профиля.
          */
-        fun updateState(state: ConnectionState, profileName: String?) {
+        fun updateState(context: android.content.Context, state: ConnectionState, profileName: String?) {
             connectionState = state
-            instance?.refreshNotification(state, profileName)
+            val running = instance
+            if (state == ConnectionState.DISCONNECTED) {
+                running?.refreshNotification(state, profileName)
+                return
+            }
+            if (running != null) {
+                running.refreshNotification(state, profileName)
+            } else {
+                val intent = Intent(context, TunVpnService::class.java).apply {
+                    action = ACTION_UPDATE
+                    putExtra(EXTRA_STATE, state)
+                    putExtra(EXTRA_PROFILE_NAME, profileName)
+                }
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    context.startForegroundService(intent)
+                } else {
+                    context.startService(intent)
+                }
+            }
         }
     }
 }

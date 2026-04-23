@@ -9,6 +9,12 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <!--
+         Required on aggressive OEM ROMs (Xiaomi / Oppo / Huawei) to keep the
+         VPN proxy process alive after the task is swiped from recents.
+         Without it, ProcessSceneCleaner kills the foreground service anyway.
+    -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+    <!--
          Required on Android 11+ so the per-app routing screen can enumerate all
          installed packages the user might want to whitelist/blacklist.
          Play policy allows this exemption for VPN apps (§ Permissions).
@@ -61,17 +67,18 @@
                 android:resource="@xml/file_paths" />
         </provider>
 
+        <!--
+             Standalone foreground service for VPN status notification.
+             GoBackend.VpnService (from wireguard-android AAR) handles the actual
+             tunnel; this one only holds the persistent notification in the shade.
+        -->
         <service
             android:name=".TunVpnService"
             android:exported="false"
-            android:foregroundServiceType="specialUse"
-            android:permission="android.permission.BIND_VPN_SERVICE">
-            <intent-filter>
-                <action android:name="android.net.VpnService" />
-            </intent-filter>
-            <meta-data
-                android:name="android.net.VpnService.SUPPORTS_ALWAYS_ON"
-                android:value="false" />
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="vpn_status_notification" />
         </service>
     </application>
 </manifest>

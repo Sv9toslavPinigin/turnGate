@@ -224,6 +224,16 @@ fun MainApp(
     var currentScreen by remember { mutableStateOf(Screen.HOME) }
     var editingProfileId by remember { mutableStateOf<String?>(null) }
 
+    // System back-button — сворачивает активность по дефолту. Хотим чтобы на
+    // вложенных экранах back возвращал на HOME, и только с HOME — закрывал приложение.
+    androidx.activity.compose.BackHandler(enabled = currentScreen != Screen.HOME) {
+        currentScreen = when (currentScreen) {
+            Screen.LOGS, Screen.ABOUT, Screen.ROUTING, Screen.TRAFFIC_RULES -> Screen.SETTINGS
+            Screen.PROFILE_EDIT, Screen.SETTINGS -> Screen.HOME
+            Screen.HOME -> Screen.HOME // unreachable (enabled=false)
+        }
+    }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -374,6 +384,9 @@ fun HomeScreen(
                 }
             }
         }
+
+        // Permission / background warnings — на виду, чтобы не пропустить.
+        HomeWarnings()
 
         // Profile carousel
         if (state.profiles.isNotEmpty()) {
@@ -667,8 +680,320 @@ fun GlobalSettingsScreen(
             SectionLabel(t.updatesSection)
             UpdateBlock(vm = vm)
 
+            NotificationsWarningRow()
+            BatteryOptimizationWarningRow()
+
             Spacer(Modifier.height(32.dp))
         }
+    }
+}
+
+/**
+ * Компактные warning-chips прямо на Home-экране, чтобы пользователь не пропустил.
+ * Показывает только активные предупреждения; если всё ок — ничего не рисует.
+ */
+@Composable
+private fun HomeWarnings() {
+    val theme = LocalTgTheme.current
+    val t = LocalStrings.current
+    val ctx = LocalContext.current
+    val lifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current.lifecycle
+
+    val prefs = remember { ctx.getSharedPreferences("tg_warnings", android.content.Context.MODE_PRIVATE) }
+    var batteryDismissed by remember { mutableStateOf(prefs.getBoolean(KEY_BATTERY_WARN_DISMISSED, false)) }
+    var notifDismissed by remember { mutableStateOf(prefs.getBoolean(KEY_NOTIF_WARN_DISMISSED, false)) }
+
+    var notifGranted by remember { mutableStateOf(isNotificationPermissionGranted(ctx)) }
+    var batteryIgnoring by remember { mutableStateOf(isIgnoringBatteryOptimizations(ctx)) }
+
+    DisposableEffect(lifecycle) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
+                notifGranted = isNotificationPermissionGranted(ctx)
+                batteryIgnoring = isIgnoringBatteryOptimizations(ctx)
+                // Если пользователь всё-таки дал права — сбрасываем dismiss-флаг,
+                // чтобы при следующей регрессии плашка появилась снова.
+                if (batteryIgnoring && batteryDismissed) {
+                    batteryDismissed = false
+                    prefs.edit().putBoolean(KEY_BATTERY_WARN_DISMISSED, false).apply()
+                }
+                if (notifGranted && notifDismissed) {
+                    notifDismissed = false
+                    prefs.edit().putBoolean(KEY_NOTIF_WARN_DISMISSED, false).apply()
+                }
+            }
+        }
+        lifecycle.addObserver(observer)
+        onDispose { lifecycle.removeObserver(observer) }
+    }
+
+    val showBattery = !batteryIgnoring && !batteryDismissed
+    val showNotif = !notifGranted && !notifDismissed
+    if (!showBattery && !showNotif) return
+
+    Spacer(Modifier.height(10.dp))
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        if (showBattery) {
+            CompactWarningChip(
+                icon = "⏻",
+                tint = theme.connecting,
+                title = t.backgroundRestrictedTitle,
+                subtitle = t.backgroundRestrictedSub,
+                cta = t.allowBackground,
+                theme = theme,
+                onClick = { requestIgnoreBatteryOptimizations(ctx) },
+                onDismiss = {
+                    batteryDismissed = true
+                    prefs.edit().putBoolean(KEY_BATTERY_WARN_DISMISSED, true).apply()
+                }
+            )
+        }
+        if (showNotif) {
+            CompactWarningChip(
+                icon = "!",
+                tint = theme.error,
+                title = t.notificationsDisabledTitle,
+                subtitle = t.notificationsDisabledSub,
+                cta = t.openSettings,
+                theme = theme,
+                onClick = { openNotificationSettings(ctx) },
+                onDismiss = {
+                    notifDismissed = true
+                    prefs.edit().putBoolean(KEY_NOTIF_WARN_DISMISSED, true).apply()
+                }
+            )
+        }
+    }
+}
+
+private const val KEY_BATTERY_WARN_DISMISSED = "battery_warning_dismissed"
+private const val KEY_NOTIF_WARN_DISMISSED = "notif_warning_dismissed"
+
+@Composable
+private fun CompactWarningChip(
+    icon: String,
+    tint: Color,
+    title: String,
+    subtitle: String,
+    cta: String,
+    theme: TgTheme,
+    onClick: () -> Unit,
+    onDismiss: (() -> Unit)? = null,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(tint.copy(alpha = 0.12f))
+            .border(1.dp, tint.copy(alpha = 0.35f), RoundedCornerShape(12.dp))
+            .clickable(indication = null, interactionSource = remember { MutableInteractionSource() }) { onClick() }
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        Box(
+            modifier = Modifier
+                .size(28.dp)
+                .clip(RoundedCornerShape(8.dp))
+                .background(tint.copy(alpha = 0.18f)),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(icon, color = tint, fontSize = 15.sp, fontWeight = FontWeight.Black)
+        }
+        Column(Modifier.weight(1f)) {
+            Text(title, color = tint, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, fontFamily = FontDisplay, maxLines = 1)
+            Text(subtitle, color = theme.textSecondary, fontSize = 10.sp, fontFamily = FontBody, maxLines = 2)
+        }
+        Text(cta, color = theme.accent, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, fontFamily = FontDisplay)
+        if (onDismiss != null) {
+            Box(
+                modifier = Modifier
+                    .size(22.dp)
+                    .clip(RoundedCornerShape(6.dp))
+                    .clickable(indication = null, interactionSource = remember { MutableInteractionSource() }) { onDismiss() },
+                contentAlignment = Alignment.Center
+            ) {
+                Text("×", color = theme.textTertiary, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+            }
+        }
+    }
+}
+
+/**
+ * Если POST_NOTIFICATIONS не дан — показываем предупреждение с кнопкой
+ * в системные настройки канала. Обновляется при возврате на экран через LifecycleOwner.
+ */
+@Composable
+private fun NotificationsWarningRow() {
+    val theme = LocalTgTheme.current
+    val t = LocalStrings.current
+    val ctx = LocalContext.current
+    val lifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current.lifecycle
+    var granted by remember { mutableStateOf(isNotificationPermissionGranted(ctx)) }
+
+    DisposableEffect(lifecycle) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
+                granted = isNotificationPermissionGranted(ctx)
+            }
+        }
+        lifecycle.addObserver(observer)
+        onDispose { lifecycle.removeObserver(observer) }
+    }
+
+    if (granted) return
+
+    Spacer(Modifier.height(16.dp))
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
+            .background(theme.error.copy(alpha = 0.14f))
+            .border(1.dp, theme.error.copy(alpha = 0.4f), RoundedCornerShape(14.dp))
+            .clickable(indication = null, interactionSource = remember { MutableInteractionSource() }) {
+                openNotificationSettings(ctx)
+            }
+            .padding(16.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(14.dp)
+    ) {
+        Box(
+            modifier = Modifier
+                .size(36.dp)
+                .clip(RoundedCornerShape(10.dp))
+                .background(theme.error.copy(alpha = 0.18f)),
+            contentAlignment = Alignment.Center
+        ) {
+            Text("!", color = theme.error, fontSize = 18.sp, fontWeight = FontWeight.Black)
+        }
+        Column(Modifier.weight(1f)) {
+            Text(
+                t.notificationsDisabledTitle,
+                color = theme.error,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.SemiBold,
+                fontFamily = FontDisplay
+            )
+            Text(
+                t.notificationsDisabledSub,
+                color = theme.textSecondary,
+                fontSize = 12.sp,
+                fontFamily = FontBody
+            )
+        }
+        Text(
+            t.openSettings,
+            color = theme.accent,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.SemiBold,
+            fontFamily = FontDisplay
+        )
+    }
+}
+
+private fun isNotificationPermissionGranted(ctx: android.content.Context): Boolean {
+    if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.TIRAMISU) return true
+    return androidx.core.content.ContextCompat.checkSelfPermission(
+        ctx, android.Manifest.permission.POST_NOTIFICATIONS
+    ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+}
+
+private fun openNotificationSettings(ctx: android.content.Context) {
+    val intent = android.content.Intent(android.provider.Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+        .putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, ctx.packageName)
+        .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+    ctx.startActivity(intent)
+}
+
+/**
+ * Warning-блок: если ОС не дала нам ignoreBatteryOptimizations — агрессивные
+ * ROM'ы (MIUI, EMUI, ColorOS) могут убивать процесс при swipe-away и VPN
+ * отвалится. Просим пользователя исключить нас из battery optimization.
+ */
+@Composable
+private fun BatteryOptimizationWarningRow() {
+    val theme = LocalTgTheme.current
+    val t = LocalStrings.current
+    val ctx = LocalContext.current
+    val lifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current.lifecycle
+    var ignoring by remember { mutableStateOf(isIgnoringBatteryOptimizations(ctx)) }
+
+    DisposableEffect(lifecycle) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
+                ignoring = isIgnoringBatteryOptimizations(ctx)
+            }
+        }
+        lifecycle.addObserver(observer)
+        onDispose { lifecycle.removeObserver(observer) }
+    }
+
+    if (ignoring) return
+
+    Spacer(Modifier.height(10.dp))
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
+            .background(theme.connecting.copy(alpha = 0.14f))
+            .border(1.dp, theme.connecting.copy(alpha = 0.4f), RoundedCornerShape(14.dp))
+            .clickable(indication = null, interactionSource = remember { MutableInteractionSource() }) {
+                requestIgnoreBatteryOptimizations(ctx)
+            }
+            .padding(16.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(14.dp)
+    ) {
+        Box(
+            modifier = Modifier
+                .size(36.dp)
+                .clip(RoundedCornerShape(10.dp))
+                .background(theme.connecting.copy(alpha = 0.18f)),
+            contentAlignment = Alignment.Center
+        ) {
+            Text("⏻", color = theme.connecting, fontSize = 18.sp, fontWeight = FontWeight.Black)
+        }
+        Column(Modifier.weight(1f)) {
+            Text(
+                t.backgroundRestrictedTitle,
+                color = theme.connecting,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.SemiBold,
+                fontFamily = FontDisplay
+            )
+            Text(
+                t.backgroundRestrictedSub,
+                color = theme.textSecondary,
+                fontSize = 12.sp,
+                fontFamily = FontBody
+            )
+        }
+        Text(
+            t.allowBackground,
+            color = theme.accent,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.SemiBold,
+            fontFamily = FontDisplay
+        )
+    }
+}
+
+private fun isIgnoringBatteryOptimizations(ctx: android.content.Context): Boolean {
+    val pm = ctx.getSystemService(android.content.Context.POWER_SERVICE) as android.os.PowerManager
+    return pm.isIgnoringBatteryOptimizations(ctx.packageName)
+}
+
+@android.annotation.SuppressLint("BatteryLife")
+private fun requestIgnoreBatteryOptimizations(ctx: android.content.Context) {
+    val intent = android.content.Intent(
+        android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
+        android.net.Uri.parse("package:${ctx.packageName}")
+    ).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+    runCatching { ctx.startActivity(intent) }.onFailure {
+        // Fallback: просто открываем общие battery settings если прямой intent недоступен.
+        val fallback = android.content.Intent(android.provider.Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
+            .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+        runCatching { ctx.startActivity(fallback) }
     }
 }
 

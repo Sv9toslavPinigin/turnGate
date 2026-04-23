@@ -27,9 +27,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val profileStore = ProfileStore(application)
     private val proxyManager = TurnProxyManager(application)
     private val backend = GoBackend(application)
-    private var tunnel: WgTunnel? = null
 
-    private val _state = MutableStateFlow(UiState())
+    // Tunnel живёт в companion object, чтобы пережить пересоздание ViewModel
+    // (открыл-закрыл приложение пока VPN поднят) — иначе disconnect() не знает
+    // какой туннель опускать.
+    private val tunnel: WgTunnel?
+        get() = sharedTunnel
+    private fun setTunnel(v: WgTunnel?) { sharedTunnel = v }
+
+    // Стартовое значение UiState читаем из TunVpnService.connectionState —
+    // это static volatile, переживает kill ViewModel и хранит актуальное
+    // состояние сервиса. Если был CONNECTED — UI сразу покажет Protected.
+    private val _state = MutableStateFlow(UiState(status = TunVpnService.connectionState))
     val state: StateFlow<UiState> = _state.asStateFlow()
 
     private val _showCaptchaDialog = MutableStateFlow(false)
@@ -51,13 +60,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         checkForUpdates()
 
         // Реактивно обновляем status-bar notification (issue #2).
+        // Инициализируем lastStatus текущим значением сервиса — чтобы на старте
+        // пересозданного VM мы НЕ перепослали ему дубль DISCONNECTED/CONNECTED
+        // и не сбили уже активную нотификацию.
         viewModelScope.launch {
-            var lastStatus: ConnectionState? = null
+            var lastStatus: ConnectionState? = TunVpnService.connectionState
             var lastProfileName: String? = null
             _state.collect { st ->
                 val profileName = st.profiles.find { it.id == st.selectedProfileId }?.name
                 if (st.status != lastStatus || profileName != lastProfileName) {
-                    TunVpnService.updateState(st.status, profileName)
+                    TunVpnService.updateState(getApplication(), st.status, profileName)
                     lastStatus = st.status
                     lastProfileName = profileName
                 }
@@ -321,7 +333,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     .apply { adjustedPeers.forEach { addPeer(it) } }
                     .build()
 
-                tunnel = WgTunnel()
+                setTunnel(WgTunnel())
                 backend.setState(tunnel!!, Tunnel.State.UP, newConfig)
 
                 // Оставляем статус CONNECTING, показываем что ждём handshake
@@ -346,7 +358,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 } else {
                     Log.w(TAG, "Handshake timeout, rolling back")
                     try { backend.setState(tunnel!!, Tunnel.State.DOWN, null) } catch (_: Exception) {}
-                    tunnel = null
+                    setTunnel(null)
                     proxyManager.stop()
                     _state.value = _state.value.copy(
                         status = ConnectionState.ERROR,
@@ -379,7 +391,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 tunnel?.let { backend.setState(it, Tunnel.State.DOWN, null) }
-                tunnel = null
+                setTunnel(null)
             } catch (e: Exception) {
                 Log.e(TAG, "Error stopping VPN", e)
             }
@@ -472,10 +484,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     override fun onCleared() {
-        try {
-            tunnel?.let { backend.setState(it, Tunnel.State.DOWN, null) }
-        } catch (_: Exception) {}
-        proxyManager.stop()
+        // VPN не роняем при уничтожении ViewModel — пользователь мог свернуть/
+        // закрыть UI, ожидая что туннель продолжит работать. Туннель и прокси
+        // останавливаются явно в disconnect() или при нажатии Disconnect в
+        // notification (issue #2 follow-up).
         super.onCleared()
     }
 
@@ -488,6 +500,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     companion object {
         private const val TAG = "MainViewModel"
+
+        /**
+         * Активный туннель — живёт в companion, переживает пересоздание
+         * ViewModel (open/close app). Нужно чтобы new VM мог вызвать
+         * disconnect() на уже запущенном туннеле.
+         */
+        @Volatile
+        private var sharedTunnel: WgTunnel? = null
     }
 }
 

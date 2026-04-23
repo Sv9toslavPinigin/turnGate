@@ -116,6 +116,17 @@ data class TgStrings(
     val upToDate: String,
     val downloadUpdate: String,
 
+    // notifications
+    val notificationsDisabledTitle: String,
+    val notificationsDisabledSub: String,
+    val openSettings: String,
+
+    // background
+    val backgroundRestrictedTitle: String,
+    val backgroundRestrictedSub: String,
+    val allowBackground: String,
+    val dismissWarning: String,
+
     // routing
     val routing: String,
     val routingSub: String,
@@ -265,6 +276,15 @@ private val EN = TgStrings(
     upToDate = "You're on the latest version",
     downloadUpdate = "Download",
 
+    notificationsDisabledTitle = "Notifications are off",
+    notificationsDisabledSub = "Grant POST_NOTIFICATIONS so TurnGate can show VPN status",
+    openSettings = "Open settings",
+
+    backgroundRestrictedTitle = "Background is restricted",
+    backgroundRestrictedSub = "Allow unrestricted background so the VPN survives when the app is closed",
+    allowBackground = "Allow",
+    dismissWarning = "Dismiss",
+
     routing = "Routing",
     routingSub = "Which apps and networks go through the VPN",
     perApp = "Per-app routing",
@@ -410,6 +430,15 @@ private val RU = TgStrings(
     checkForUpdatesSub = "Нажмите, чтобы запросить GitHub releases",
     upToDate = "У вас последняя версия",
     downloadUpdate = "Скачать",
+
+    notificationsDisabledTitle = "Уведомления отключены",
+    notificationsDisabledSub = "Разрешите TurnGate показывать статус VPN в шторке",
+    openSettings = "Открыть настройки",
+
+    backgroundRestrictedTitle = "Фоновая работа ограничена",
+    backgroundRestrictedSub = "Снимите ограничения, чтобы VPN не падал при закрытии приложения",
+    allowBackground = "Разрешить",
+    dismissWarning = "Скрыть",
 
     routing = "Маршрутизация",
     routingSub = "Какие приложения и сети идут через VPN",

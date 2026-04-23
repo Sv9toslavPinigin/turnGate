@@ -64,12 +64,7 @@ object UpdateChecker {
                 return@withContext null
             }
 
-            // Parse version code from tag: "v3" -> 3, "v3.0" -> 3, "3" -> 3
-            val versionCode = tagName
-                .removePrefix("v")
-                .split(".")
-                .firstOrNull()
-                ?.toIntOrNull() ?: 0
+            val versionCode = parseTagVersionCode(tagName)
 
             if (versionCode <= BuildConfig.VERSION_CODE) {
                 Log.d(TAG, "No update: remote=$versionCode, local=${BuildConfig.VERSION_CODE}")
@@ -85,6 +80,35 @@ object UpdateChecker {
         } catch (e: Exception) {
             Log.d(TAG, "Update check failed (silent): ${e.message}")
             null
+        }
+    }
+
+    /**
+     * Преобразует GitHub-тег релиза в versionCode для сравнения с локальным
+     * BuildConfig.VERSION_CODE.
+     *
+     * Поддерживает два формата:
+     *  - Legacy монотонный int: "v27" → 27. Применяется к старым релизам, когда
+     *    не использовался семвер (v1..v27 в истории). Ограничение — должно
+     *    быть одно число без точек.
+     *  - Semver: "v1.0.0" → 10000, "v1.0.1" → 10001, "v1.1.0" → 10100,
+     *    "v2.0.0" → 20000. Формула: major*10000 + minor*100 + patch.
+     *    Старт с v1.0.0 = 10000 гарантирует что новый формат строго больше
+     *    последнего legacy-кода (v99 → 99 << 10000), поэтому миграция проходит
+     *    безболезненно.
+     */
+    fun parseTagVersionCode(tag: String): Int {
+        val v = tag.removePrefix("v").trim()
+        if (v.isEmpty()) return 0
+        val parts = v.split(".")
+        return when (parts.size) {
+            1 -> parts[0].toIntOrNull() ?: 0
+            else -> {
+                val major = parts.getOrNull(0)?.toIntOrNull() ?: 0
+                val minor = parts.getOrNull(1)?.toIntOrNull() ?: 0
+                val patch = parts.getOrNull(2)?.toIntOrNull() ?: 0
+                major * 10000 + minor * 100 + patch
+            }
         }
     }
 
