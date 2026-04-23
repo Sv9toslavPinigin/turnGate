@@ -70,10 +70,16 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    /** Android 13+ требует runtime-разрешение на показ нотификаций (issue #2). */
+    private val notificationPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { /* ignore — откажут, просто нотификаций не будет */ }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         pendingDeepLink = intent?.data?.toString()?.takeIf { it.startsWith("turnbridge://") }
         handleNotificationAction(intent)
+        requestNotificationPermissionIfNeeded()
 
         setContent {
             val context = LocalContext.current
@@ -144,6 +150,16 @@ class MainActivity : ComponentActivity() {
     private fun handleNotificationAction(intent: Intent?) {
         if (intent?.action == TunVpnService.ACTION_DISCONNECT) {
             viewModelRef?.disconnect()
+        }
+    }
+
+    private fun requestNotificationPermissionIfNeeded() {
+        if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.TIRAMISU) return
+        val granted = androidx.core.content.ContextCompat.checkSelfPermission(
+            this, android.Manifest.permission.POST_NOTIFICATIONS
+        ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+        if (!granted) {
+            notificationPermissionLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
         }
     }
 }
